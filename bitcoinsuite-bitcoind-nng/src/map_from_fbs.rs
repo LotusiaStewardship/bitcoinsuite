@@ -24,7 +24,7 @@ fn coin_from_fbs(coin: Coin) -> Result<bitcoinsuite_core::Coin> {
     Ok(bitcoinsuite_core::Coin {
         tx_output: TxOutput {
             value: tx_out.amount() as i64,
-            script: Script::from_slice(tx_out.script().field("TxOut.script")?),
+            script: Script::from_slice(tx_out.script().field("TxOut.script")?.bytes()),
         },
         height: if coin.height() == -1 {
             None
@@ -39,7 +39,7 @@ impl structs::Tx {
     pub fn from_fbs(fbs: Tx) -> Result<Self> {
         Ok(structs::Tx {
             txid: Sha256d::new(fbs.txid().field("Tx.txid")?.hash().field("Tx.txid.hash")?.0),
-            raw: fbs.raw().field("Tx.raw")?.to_vec(),
+            raw: fbs.raw().field("Tx.raw")?.bytes().to_vec(),
             spent_coins: fbs
                 .spent_coins()
                 .map(|outputs| outputs.iter().map(coin_from_fbs).collect::<Result<_>>())
@@ -51,7 +51,7 @@ impl structs::Tx {
 impl structs::BlockHeader {
     pub fn from_fbs(fbs: BlockHeader) -> Result<Self> {
         Ok(structs::BlockHeader {
-            raw: fbs.raw().field("BlockHeader.raw")?.to_vec(),
+            raw: fbs.raw().field("BlockHeader.raw")?.bytes().to_vec(),
             hash: hash_from_block_hash(fbs.block_hash().field("BlockHeader.block_hash")?)?,
             prev_hash: hash_from_block_hash(
                 fbs.prev_block_hash().field("BlockHeader.prev_block_hash")?,
@@ -112,6 +112,7 @@ impl structs::BlockMetadata {
             field_value: fbs
                 .field_value()
                 .field("BlockMetadata.field_value")?
+                .bytes()
                 .to_vec(),
         })
     }

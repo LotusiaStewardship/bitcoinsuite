@@ -91,3 +91,84 @@ pub struct BlockDisconnected {
 pub struct ChainStateFlushed {
     pub block_hash: Sha256d,
 }
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MiningTemplateTx {
+    pub raw: Vec<u8>,
+    pub txid: Sha256d,
+    pub fee: i64,
+    pub sigops: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MiningTemplate {
+    pub template_id: u64,
+    pub block: Vec<u8>,
+    pub header: Vec<u8>,
+    pub previous_block_hash: Sha256d,
+    pub height: i32,
+    pub version: u32,
+    pub bits: u32,
+    pub target: Sha256d,
+    pub curtime: u64,
+    pub mintime: u64,
+    pub maxtime: u64,
+    pub coinbase_value: u64,
+    pub coinbase_tx: Vec<u8>,
+    pub transactions: Vec<MiningTemplateTx>,
+    pub coinbase1: String,
+    pub coinbase2: String,
+    pub merkle_branches: Vec<String>,
+    pub prev_hash_stratum: String,
+    pub nbits_stratum: String,
+    pub ntime_stratum: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MiningSubmitResult {
+    Accepted,
+    Duplicate,
+    DuplicateInvalid,
+    DuplicateInconclusive,
+    Inconclusive,
+    Rejected,
+    DeserializationError,
+    InvalidBlock,
+    InvalidCoinbase,
+    InvalidPrevBlock,
+    Unknown(i32),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SubmitMinedBlockResult {
+    pub result: MiningSubmitResult,
+    pub accepted: bool,
+    pub reject_reason: String,
+    pub block_hash: Sha256d,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ValidateMinedBlockProposalResult {
+    pub result: MiningSubmitResult,
+    pub valid: bool,
+    pub reject_reason: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SendRawTransactionResult {
+    Accepted,
+    AlreadyInChain,
+    MempoolRejected,
+    MempoolError,
+    MaxFeeExceeded,
+    DeserializationError,
+    Unknown(i32),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SendRawTransactionSubmitResult {
+    pub result: SendRawTransactionResult,
+    pub accepted: bool,
+    pub reject_reason: String,
+    pub txid: Sha256d,
+}

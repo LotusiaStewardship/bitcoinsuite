@@ -80,6 +80,21 @@ impl PubInterface {
         self.parse_msg(msg)
     }
 
+    /// Receive one pub message and return raw topic prefix + payload bytes.
+    ///
+    /// Useful for forward compatibility when lotusd adds new topics that are
+    /// not yet modeled in this crate.
+    pub fn recv_raw(&self) -> Result<(String, Vec<u8>)> {
+        const PREFIX_LEN: usize = 12;
+        let msg = self.sock.recv()?;
+        if msg.len() < PREFIX_LEN {
+            return Err(InvalidPubMessage(msg).into());
+        }
+        let prefix = String::from_utf8_lossy(&msg[..PREFIX_LEN]).to_string();
+        let payload = msg[PREFIX_LEN..].to_vec();
+        Ok((prefix, payload))
+    }
+
     fn parse_msg(&self, msg: nng::Message) -> Result<structs::Message> {
         const PREFIX_LEN: usize = 12;
         if msg.len() < PREFIX_LEN {

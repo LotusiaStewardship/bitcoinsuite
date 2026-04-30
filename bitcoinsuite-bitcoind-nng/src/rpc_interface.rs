@@ -13,8 +13,13 @@ use crate::{
         GetBlockRangeRequest, GetBlockRangeRequestArgs, GetBlockRangeResponse, GetBlockRequest,
         GetBlockRequestArgs, GetBlockResponse, GetBlockSliceRequest, GetBlockSliceRequestArgs,
         GetBlockSliceResponse, GetMempoolRequest, GetMempoolRequestArgs, GetMempoolResponse,
+        GetMiningTemplateRequest, GetMiningTemplateRequestArgs, GetMiningTemplateResponse,
         GetUndoSliceRequest, GetUndoSliceRequestArgs, GetUndoSliceResponse, Hash, RpcCall,
-        RpcCallArgs, RpcRequest, RpcResult,
+        RpcCallArgs, RpcRequest, RpcResult, SendRawTransactionRequest,
+        SendRawTransactionRequestArgs, SendRawTransactionResponse, SubmitMinedBlockRequest,
+        SubmitMinedBlockRequestArgs, SubmitMinedBlockResponse,
+        ValidateMinedBlockProposalRequest, ValidateMinedBlockProposalRequestArgs,
+        ValidateMinedBlockProposalResponse,
     },
     structs,
 };
@@ -154,6 +159,7 @@ impl RpcInterface {
         Ok(response
             .data()
             .field("GetBlockSliceResponse.data")?
+            .bytes()
             .to_vec())
     }
 
@@ -180,7 +186,11 @@ impl RpcInterface {
             &self.fbb_opts,
             self.handle_msg(&msg)?,
         )?;
-        Ok(response.data().field("GetUndoSliceResponse.data")?.to_vec())
+        Ok(response
+            .data()
+            .field("GetUndoSliceResponse.data")?
+            .bytes()
+            .to_vec())
     }
 
     pub fn get_mempool(&self) -> Result<Vec<structs::MempoolTx>> {
@@ -204,19 +214,271 @@ impl RpcInterface {
             .collect::<Result<_>>()
     }
 
+    pub fn get_mining_template(
+        &self,
+        coinbase_script: Option<&[u8]>,
+        extranonce1_size: u32,
+        extranonce2_size: u32,
+        include_transactions: bool,
+    ) -> Result<structs::MiningTemplate> {
+        let mut fbb = flatbuffers::FlatBufferBuilder::with_capacity(2048);
+        let coinbase_script_offset = coinbase_script.map(|s| fbb.create_vector(s));
+        let request = GetMiningTemplateRequest::create(
+            &mut fbb,
+            &GetMiningTemplateRequestArgs {
+                coinbase_script: coinbase_script_offset,
+                extranonce1_size,
+                extranonce2_size,
+                include_transactions,
+            },
+        );
+        let rpc_call = RpcCall::create(
+            &mut fbb,
+            &RpcCallArgs {
+                rpc_type: RpcRequest::GetMiningTemplateRequest,
+                rpc: Some(request.as_union_value()),
+            },
+        );
+        fbb.finish(rpc_call, None);
+        let msg = self.tranceive(&fbb)?;
+        let response = flatbuffers::root_with_opts::<GetMiningTemplateResponse>(
+            &self.fbb_opts,
+            self.handle_msg(&msg)?,
+        )?;
+        Ok(structs::MiningTemplate {
+            template_id: response.template_id(),
+            block: response
+                .block()
+                .field("GetMiningTemplateResponse.block")?
+                .bytes()
+                .to_vec(),
+            header: response
+                .header()
+                .field("GetMiningTemplateResponse.header")?
+                .bytes()
+                .to_vec(),
+            previous_block_hash: bitcoinsuite_core::Sha256d::new(
+                response
+                    .previous_block_hash()
+                    .field("GetMiningTemplateResponse.previous_block_hash")?
+                    .hash()
+                    .field("GetMiningTemplateResponse.previous_block_hash.hash")?
+                    .0,
+            ),
+            height: response.height(),
+            version: response.version(),
+            bits: response.bits(),
+            target: bitcoinsuite_core::Sha256d::new(
+                response
+                    .target()
+                    .field("GetMiningTemplateResponse.target")?
+                    .0,
+            ),
+            curtime: response.curtime(),
+            mintime: response.mintime(),
+            maxtime: response.maxtime(),
+            coinbase_value: response.coinbase_value(),
+            coinbase_tx: response
+                .coinbase_tx()
+                .field("GetMiningTemplateResponse.coinbase_tx")?
+                .bytes()
+                .to_vec(),
+            transactions: response
+                .transactions()
+                .map(|txs| {
+                    txs.iter()
+                        .map(|tx| {
+                            Ok(structs::MiningTemplateTx {
+                                raw: tx.raw().field("MiningTemplateTx.raw")?.bytes().to_vec(),
+                                txid: bitcoinsuite_core::Sha256d::new(
+                                    tx.txid()
+                                        .field("MiningTemplateTx.txid")?
+                                        .hash()
+                                        .field("MiningTemplateTx.txid.hash")?
+                                        .0,
+                                ),
+                                fee: tx.fee(),
+                                sigops: tx.sigops(),
+                            })
+                        })
+                        .collect::<Result<Vec<_>>>()
+                })
+                .transpose()?
+                .unwrap_or_default(),
+            coinbase1: response
+                .coinbase1()
+                .field("GetMiningTemplateResponse.coinbase1")?
+                .to_string(),
+            coinbase2: response
+                .coinbase2()
+                .field("GetMiningTemplateResponse.coinbase2")?
+                .to_string(),
+            merkle_branches: response
+                .merkle_branches()
+                .map(|b| b.iter().map(|s| s.to_string()).collect())
+                .unwrap_or_default(),
+            prev_hash_stratum: response
+                .prev_hash_stratum()
+                .field("GetMiningTemplateResponse.prev_hash_stratum")?
+                .to_string(),
+            nbits_stratum: response
+                .nbits_stratum()
+                .field("GetMiningTemplateResponse.nbits_stratum")?
+                .to_string(),
+            ntime_stratum: response
+                .ntime_stratum()
+                .field("GetMiningTemplateResponse.ntime_stratum")?
+                .to_string(),
+        })
+    }
+
+    pub fn submit_mined_block(&self, block: &[u8]) -> Result<structs::SubmitMinedBlockResult> {
+        let mut fbb = flatbuffers::FlatBufferBuilder::with_capacity(block.len() + 128);
+        let block_vec = fbb.create_vector(block);
+        let request = SubmitMinedBlockRequest::create(
+            &mut fbb,
+            &SubmitMinedBlockRequestArgs {
+                block: Some(block_vec),
+            },
+        );
+        let rpc_call = RpcCall::create(
+            &mut fbb,
+            &RpcCallArgs {
+                rpc_type: RpcRequest::SubmitMinedBlockRequest,
+                rpc: Some(request.as_union_value()),
+            },
+        );
+        fbb.finish(rpc_call, None);
+        let msg = self.tranceive(&fbb)?;
+        let response = flatbuffers::root_with_opts::<SubmitMinedBlockResponse>(
+            &self.fbb_opts,
+            self.handle_msg(&msg)?,
+        )?;
+        Ok(structs::SubmitMinedBlockResult {
+            result: map_submit_result(response.result()),
+            accepted: response.accepted(),
+            reject_reason: response
+                .reject_reason()
+                .map(|s| s.to_string())
+                .unwrap_or_default(),
+            block_hash: bitcoinsuite_core::Sha256d::new(
+                response
+                    .block_hash()
+                    .field("SubmitMinedBlockResponse.block_hash")?
+                    .hash()
+                    .field("SubmitMinedBlockResponse.block_hash.hash")?
+                    .0,
+            ),
+        })
+    }
+
+    pub fn validate_mined_block_proposal(
+        &self,
+        block: &[u8],
+    ) -> Result<structs::ValidateMinedBlockProposalResult> {
+        let mut fbb = flatbuffers::FlatBufferBuilder::with_capacity(block.len() + 128);
+        let block_vec = fbb.create_vector(block);
+        let request = ValidateMinedBlockProposalRequest::create(
+            &mut fbb,
+            &ValidateMinedBlockProposalRequestArgs {
+                block: Some(block_vec),
+            },
+        );
+        let rpc_call = RpcCall::create(
+            &mut fbb,
+            &RpcCallArgs {
+                rpc_type: RpcRequest::ValidateMinedBlockProposalRequest,
+                rpc: Some(request.as_union_value()),
+            },
+        );
+        fbb.finish(rpc_call, None);
+        let msg = self.tranceive(&fbb)?;
+        let response = flatbuffers::root_with_opts::<ValidateMinedBlockProposalResponse>(
+            &self.fbb_opts,
+            self.handle_msg(&msg)?,
+        )?;
+        Ok(structs::ValidateMinedBlockProposalResult {
+            result: map_submit_result(response.result()),
+            valid: response.valid(),
+            reject_reason: response
+                .reject_reason()
+                .map(|s| s.to_string())
+                .unwrap_or_default(),
+        })
+    }
+
+    pub fn send_raw_transaction(
+        &self,
+        raw_tx: &[u8],
+        max_fee_rate: u64,
+        relay: bool,
+        wait_callback: bool,
+    ) -> Result<structs::SendRawTransactionSubmitResult> {
+        let mut fbb = flatbuffers::FlatBufferBuilder::with_capacity(raw_tx.len() + 128);
+        let raw_tx_vec = fbb.create_vector(raw_tx);
+        let request = SendRawTransactionRequest::create(
+            &mut fbb,
+            &SendRawTransactionRequestArgs {
+                raw_tx: Some(raw_tx_vec),
+                max_fee_rate,
+                relay,
+                wait_callback,
+            },
+        );
+        let rpc_call = RpcCall::create(
+            &mut fbb,
+            &RpcCallArgs {
+                rpc_type: RpcRequest::SendRawTransactionRequest,
+                rpc: Some(request.as_union_value()),
+            },
+        );
+        fbb.finish(rpc_call, None);
+        let msg = self.tranceive(&fbb)?;
+        let response = flatbuffers::root_with_opts::<SendRawTransactionResponse>(
+            &self.fbb_opts,
+            self.handle_msg(&msg)?,
+        )?;
+        Ok(structs::SendRawTransactionSubmitResult {
+            result: map_send_raw_tx_result(response.result()),
+            accepted: response.accepted(),
+            reject_reason: response
+                .reject_reason()
+                .map(|s| s.to_string())
+                .unwrap_or_default(),
+            txid: bitcoinsuite_core::Sha256d::new(
+                response
+                    .txid()
+                    .field("SendRawTransactionResponse.txid")?
+                    .hash()
+                    .field("SendRawTransactionResponse.txid.hash")?
+                    .0,
+            ),
+        })
+    }
+
     fn tranceive(&self, fbb: &flatbuffers::FlatBufferBuilder) -> Result<Message> {
+        self.tranceive_raw(fbb.finished_data())
+    }
+
+    /// Send pre-encoded RpcCall bytes and return raw response message.
+    pub fn tranceive_raw(&self, payload: &[u8]) -> Result<Message> {
         let _guard = self.mutex.lock().expect("Acquire mutex failed");
-        self.sock
-            .send(fbb.finished_data())
-            .map_err(|(_, err)| err)?;
+        self.sock.send(payload).map_err(|(_, err)| err)?;
         let resp = self.sock.recv()?;
         Ok(resp)
+    }
+
+    /// Forward-compatible escape hatch for callers using newer schemas than
+    /// this crate currently models.
+    pub fn call_raw(&self, rpc_call_payload: &[u8]) -> Result<Vec<u8>> {
+        let msg = self.tranceive_raw(rpc_call_payload)?;
+        Ok(self.handle_msg(&msg)?.to_vec())
     }
 
     fn handle_msg<'a>(&self, msg: &'a Message) -> Result<&'a [u8]> {
         let result = flatbuffers::root_with_opts::<RpcResult>(&self.fbb_opts, &msg[..])?;
         if result.is_success() {
-            result.data().field("data")
+            Ok(result.data().field("data")?.bytes())
         } else {
             Err(RpcError {
                 error_code: result.error_code(),
@@ -224,6 +486,40 @@ impl RpcInterface {
             }
             .into())
         }
+    }
+}
+
+fn map_send_raw_tx_result(
+    v: crate::nng_interface_generated::nng_interface::SendRawTransactionResult,
+) -> structs::SendRawTransactionResult {
+    use crate::nng_interface_generated::nng_interface::SendRawTransactionResult as Fbs;
+    match v {
+        Fbs::ACCEPTED => structs::SendRawTransactionResult::Accepted,
+        Fbs::ALREADY_IN_CHAIN => structs::SendRawTransactionResult::AlreadyInChain,
+        Fbs::MEMPOOL_REJECTED => structs::SendRawTransactionResult::MempoolRejected,
+        Fbs::MEMPOOL_ERROR => structs::SendRawTransactionResult::MempoolError,
+        Fbs::MAX_FEE_EXCEEDED => structs::SendRawTransactionResult::MaxFeeExceeded,
+        Fbs::DESERIALIZATION_ERROR => structs::SendRawTransactionResult::DeserializationError,
+        _ => structs::SendRawTransactionResult::Unknown(v.0),
+    }
+}
+
+fn map_submit_result(
+    v: crate::nng_interface_generated::nng_interface::MiningSubmitResult,
+) -> structs::MiningSubmitResult {
+    use crate::nng_interface_generated::nng_interface::MiningSubmitResult as Fbs;
+    match v {
+        Fbs::ACCEPTED => structs::MiningSubmitResult::Accepted,
+        Fbs::DUPLICATE => structs::MiningSubmitResult::Duplicate,
+        Fbs::DUPLICATE_INVALID => structs::MiningSubmitResult::DuplicateInvalid,
+        Fbs::DUPLICATE_INCONCLUSIVE => structs::MiningSubmitResult::DuplicateInconclusive,
+        Fbs::INCONCLUSIVE => structs::MiningSubmitResult::Inconclusive,
+        Fbs::REJECTED => structs::MiningSubmitResult::Rejected,
+        Fbs::DESERIALIZATION_ERROR => structs::MiningSubmitResult::DeserializationError,
+        Fbs::INVALID_BLOCK => structs::MiningSubmitResult::InvalidBlock,
+        Fbs::INVALID_COINBASE => structs::MiningSubmitResult::InvalidCoinbase,
+        Fbs::INVALID_PREV_BLOCK => structs::MiningSubmitResult::InvalidPrevBlock,
+        _ => structs::MiningSubmitResult::Unknown(v.0),
     }
 }
 

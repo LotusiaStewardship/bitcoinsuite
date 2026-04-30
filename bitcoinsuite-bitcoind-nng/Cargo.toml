@@ -5,7 +5,7 @@ authors = ["Tobias Ruck <ruck.tobias@gmail.com>"]
 edition = "2021"
 
 [dependencies]
-flatbuffers = "2.0"
+flatbuffers = "25"
 nng = "1.0"
 
 # Error handling
