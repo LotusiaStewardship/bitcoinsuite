@@ -15,8 +15,7 @@ use crate::{
         GetBlockSliceResponse, GetMempoolRequest, GetMempoolRequestArgs, GetMempoolResponse,
         GetMiningTemplateRequest, GetMiningTemplateRequestArgs, GetMiningTemplateResponse,
         GetUndoSliceRequest, GetUndoSliceRequestArgs, GetUndoSliceResponse, Hash, RpcCall,
-        RpcCallArgs, RpcRequest, RpcResult, SendRawTransactionRequest,
-        SendRawTransactionRequestArgs, SendRawTransactionResponse, SubmitMinedBlockRequest,
+        RpcCallArgs, RpcRequest, RpcResult, SubmitMinedBlockRequest,
         SubmitMinedBlockRequestArgs, SubmitMinedBlockResponse,
         ValidateMinedBlockProposalRequest, ValidateMinedBlockProposalRequestArgs,
         ValidateMinedBlockProposalResponse,
@@ -407,55 +406,6 @@ impl RpcInterface {
         })
     }
 
-    pub fn send_raw_transaction(
-        &self,
-        raw_tx: &[u8],
-        max_fee_rate: u64,
-        relay: bool,
-        wait_callback: bool,
-    ) -> Result<structs::SendRawTransactionSubmitResult> {
-        let mut fbb = flatbuffers::FlatBufferBuilder::with_capacity(raw_tx.len() + 128);
-        let raw_tx_vec = fbb.create_vector(raw_tx);
-        let request = SendRawTransactionRequest::create(
-            &mut fbb,
-            &SendRawTransactionRequestArgs {
-                raw_tx: Some(raw_tx_vec),
-                max_fee_rate,
-                relay,
-                wait_callback,
-            },
-        );
-        let rpc_call = RpcCall::create(
-            &mut fbb,
-            &RpcCallArgs {
-                rpc_type: RpcRequest::SendRawTransactionRequest,
-                rpc: Some(request.as_union_value()),
-            },
-        );
-        fbb.finish(rpc_call, None);
-        let msg = self.tranceive(&fbb)?;
-        let response = flatbuffers::root_with_opts::<SendRawTransactionResponse>(
-            &self.fbb_opts,
-            self.handle_msg(&msg)?,
-        )?;
-        Ok(structs::SendRawTransactionSubmitResult {
-            result: map_send_raw_tx_result(response.result()),
-            accepted: response.accepted(),
-            reject_reason: response
-                .reject_reason()
-                .map(|s| s.to_string())
-                .unwrap_or_default(),
-            txid: bitcoinsuite_core::Sha256d::new(
-                response
-                    .txid()
-                    .field("SendRawTransactionResponse.txid")?
-                    .hash()
-                    .field("SendRawTransactionResponse.txid.hash")?
-                    .0,
-            ),
-        })
-    }
-
     fn tranceive(&self, fbb: &flatbuffers::FlatBufferBuilder) -> Result<Message> {
         self.tranceive_raw(fbb.finished_data())
     }
@@ -486,21 +436,6 @@ impl RpcInterface {
             }
             .into())
         }
-    }
-}
-
-fn map_send_raw_tx_result(
-    v: crate::nng_interface_generated::nng_interface::SendRawTransactionResult,
-) -> structs::SendRawTransactionResult {
-    use crate::nng_interface_generated::nng_interface::SendRawTransactionResult as Fbs;
-    match v {
-        Fbs::ACCEPTED => structs::SendRawTransactionResult::Accepted,
-        Fbs::ALREADY_IN_CHAIN => structs::SendRawTransactionResult::AlreadyInChain,
-        Fbs::MEMPOOL_REJECTED => structs::SendRawTransactionResult::MempoolRejected,
-        Fbs::MEMPOOL_ERROR => structs::SendRawTransactionResult::MempoolError,
-        Fbs::MAX_FEE_EXCEEDED => structs::SendRawTransactionResult::MaxFeeExceeded,
-        Fbs::DESERIALIZATION_ERROR => structs::SendRawTransactionResult::DeserializationError,
-        _ => structs::SendRawTransactionResult::Unknown(v.0),
     }
 }
 

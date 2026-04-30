@@ -154,21 +154,3 @@ pub struct ValidateMinedBlockProposalResult {
     pub reject_reason: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SendRawTransactionResult {
-    Accepted,
-    AlreadyInChain,
-    MempoolRejected,
-    MempoolError,
-    MaxFeeExceeded,
-    DeserializationError,
-    Unknown(i32),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SendRawTransactionSubmitResult {
-    pub result: SendRawTransactionResult,
-    pub accepted: bool,
-    pub reject_reason: String,
-    pub txid: Sha256d,
-}
