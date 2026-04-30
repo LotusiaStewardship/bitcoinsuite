@@ -15,10 +15,9 @@ use crate::{
         GetBlockSliceResponse, GetMempoolRequest, GetMempoolRequestArgs, GetMempoolResponse,
         GetMiningTemplateRequest, GetMiningTemplateRequestArgs, GetMiningTemplateResponse,
         GetUndoSliceRequest, GetUndoSliceRequestArgs, GetUndoSliceResponse, Hash, RpcCall,
-        RpcCallArgs, RpcRequest, RpcResult, SubmitMinedBlockRequest,
-        SubmitMinedBlockRequestArgs, SubmitMinedBlockResponse,
-        ValidateMinedBlockProposalRequest, ValidateMinedBlockProposalRequestArgs,
-        ValidateMinedBlockProposalResponse,
+        RpcCallArgs, RpcRequest, RpcResult, SubmitMinedBlockRequest, SubmitMinedBlockRequestArgs,
+        SubmitMinedBlockResponse, ValidateMinedBlockProposalRequest,
+        ValidateMinedBlockProposalRequestArgs, ValidateMinedBlockProposalResponse,
     },
     structs,
 };
@@ -216,16 +215,19 @@ impl RpcInterface {
     pub fn get_mining_template(
         &self,
         coinbase_script: Option<&[u8]>,
+        coinbase_identity: Option<&[u8]>,
         extranonce1_size: u32,
         extranonce2_size: u32,
         include_transactions: bool,
     ) -> Result<structs::MiningTemplate> {
         let mut fbb = flatbuffers::FlatBufferBuilder::with_capacity(2048);
         let coinbase_script_offset = coinbase_script.map(|s| fbb.create_vector(s));
+        let coinbase_identity_offset = coinbase_identity.map(|s| fbb.create_vector(s));
         let request = GetMiningTemplateRequest::create(
             &mut fbb,
             &GetMiningTemplateRequestArgs {
                 coinbase_script: coinbase_script_offset,
+                coinbase_identity: coinbase_identity_offset,
                 extranonce1_size,
                 extranonce2_size,
                 include_transactions,
