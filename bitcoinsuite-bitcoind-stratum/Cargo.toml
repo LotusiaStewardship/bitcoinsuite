@@ -1,0 +1,22 @@
+[package]
+name = "bitcoinsuite-bitcoind-stratum"
+version = "0.1.0"
+authors = ["Lotusia Stewardship <stewardship@lotusia.org>"]
+edition = "2021"
+
+[dependencies]
+# Error handling
+thiserror = "1.0"
+anyhow = "1.0"
+
+# Bitcoin/Lotus primitives
+bitcoinsuite-core = { path = "../bitcoinsuite-core" }
+
+# Byte/string libs
+hex = "0.4"
+
+# Math
+primitive-types = "0.12"
+
+[dev-dependencies]
+serde_json = "1.0"

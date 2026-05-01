@@ -332,6 +332,7 @@ fn net_conf_line(net: Net) -> &'static str {
     match net {
         Net::Mainnet => "",
         Net::Regtest => "regtest=1",
+        Net::Testnet => "testnet=1",
     }
 }
 
@@ -339,5 +340,6 @@ fn net_conf_section_header(net: Net) -> &'static str {
     match net {
         Net::Mainnet => "",
         Net::Regtest => "[regtest]",
+        Net::Testnet => "[test]",
     }
 }

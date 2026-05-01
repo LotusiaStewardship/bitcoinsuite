@@ -75,6 +75,7 @@ impl LotusAddress {
         let net_char = match net {
             Net::Mainnet => '_',
             Net::Regtest => 'R',
+            Net::Testnet => 'T',
         };
         lotus_addr.push(net_char);
 
@@ -112,11 +113,12 @@ impl FromStr for LotusAddress {
         if prefix.is_empty() {
             return Err(MissingPrefix);
         }
-        // net: "_" for mainnet, "R" for regtest, "T" for testnet (unsupported)
+        // net: "_" for mainnet, "R" for regtest, "T" for testnet
         let net_char = s.chars().nth(prefix.len()).ok_or(MissingNetChar)?;
         let net = match net_char {
             '_' => Net::Mainnet,
             'R' => Net::Regtest,
+            'T' => Net::Testnet,
             _ => return Err(UnsupportedNet(net_char)),
         };
         // Base58 encoded data
@@ -326,6 +328,24 @@ mod tests {
                 address.as_str(),
                 "lotusR1PrQReKdmXH6hyCk4NFR398HeWxvJWW4Hie3rA",
             );
+        }
+        {
+            // Testnet address
+            let address = LotusAddress::new(LOTUS_PREFIX, Net::Testnet, p2pkh.clone());
+            assert_eq!(address.prefix(), "lotus");
+            assert_eq!(address.net(), Net::Testnet);
+            assert_eq!(address.script(), &p2pkh);
+            // Verify it starts with lotusT
+            assert!(address.as_str().starts_with("lotusT"));
+        }
+        {
+            // Parse testnet address
+            let addr_str = "lotusT16PSJQ6bzSj4Bgzsb7voKgX6PzHMxKeQH5z1ZCe6T".to_string();
+            let address = addr_str.parse::<LotusAddress>().unwrap();
+            assert_eq!(address.prefix(), "lotus");
+            assert_eq!(address.net(), Net::Testnet);
+            assert_eq!(address.script(), &p2pkh);
+            assert_eq!(address.as_str(), "lotusT16PSJQ6bzSj4Bgzsb7voKgX6PzHMxKeQH5z1ZCe6T");
         }
 
         Ok(())

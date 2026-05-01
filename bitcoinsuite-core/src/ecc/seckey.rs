@@ -43,6 +43,11 @@ impl SecKey {
             return Err(SecKeyParseError::InvalidWif);
         }
 
+        // Validate WIF version byte: 0x80 for mainnet, 0xef for testnet
+        if payload[0] != 0x80 && payload[0] != 0xef {
+            return Err(SecKeyParseError::InvalidWif);
+        }
+
         if payload.len() < 33 {
             return Err(SecKeyParseError::InvalidWif);
         }
@@ -91,5 +96,28 @@ mod tests {
     fn test_format_debug_doesnt_leak() {
         let seckey = SecKey::new_unchecked([1; 32]);
         assert_eq!(format!("{seckey:?}"), "SecKey([SECRET])");
+    }
+
+    #[test]
+    fn test_from_hex() {
+        let hex_key = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let seckey = SecKey::from_hex_or_wif(hex_key).unwrap();
+        assert_eq!(seckey.as_slice(), &[0xaa; 32]);
+    }
+
+    #[test]
+    fn test_from_testnet_wif() {
+        // Testnet WIF: cPymiBZp9Ak8aVAmrnh8TL8E4yoibD61KE7weuhXNbaMsJt2murF
+        let wif = "cPymiBZp9Ak8aVAmrnh8TL8E4yoibD61KE7weuhXNbaMsJt2murF";
+        let seckey = SecKey::from_hex_or_wif(wif).unwrap();
+        // The key should parse successfully
+        assert!(!seckey.as_slice().iter().all(|&b| b == 0));
+    }
+
+    #[test]
+    fn test_invalid_wif_format() {
+        // Invalid WIF (not base58)
+        let invalid_wif = "invalid_wif_string";
+        assert!(SecKey::from_hex_or_wif(invalid_wif).is_err());
     }
 }

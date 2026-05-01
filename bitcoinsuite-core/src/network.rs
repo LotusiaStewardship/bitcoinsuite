@@ -19,6 +19,7 @@ pub enum Net {
     #[default]
     Mainnet,
     Regtest,
+    Testnet,
 }
 
 impl Network {
