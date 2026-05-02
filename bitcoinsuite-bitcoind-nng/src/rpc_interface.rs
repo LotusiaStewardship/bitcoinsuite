@@ -15,9 +15,7 @@ use crate::{
         GetBlockSliceResponse, GetMempoolRequest, GetMempoolRequestArgs, GetMempoolResponse,
         GetMiningTemplateRequest, GetMiningTemplateRequestArgs, GetMiningTemplateResponse,
         GetUndoSliceRequest, GetUndoSliceRequestArgs, GetUndoSliceResponse, Hash, RpcCall,
-        RpcCallArgs, RpcRequest, RpcResult, SubmitMinedBlockRequest, SubmitMinedBlockRequestArgs,
-        SubmitMinedBlockResponse, ValidateMinedBlockProposalRequest,
-        ValidateMinedBlockProposalRequestArgs, ValidateMinedBlockProposalResponse,
+        RpcCallArgs, RpcRequest, RpcResult,
     },
     structs,
 };
@@ -333,81 +331,6 @@ impl RpcInterface {
         })
     }
 
-    pub fn submit_mined_block(&self, block: &[u8]) -> Result<structs::SubmitMinedBlockResult> {
-        let mut fbb = flatbuffers::FlatBufferBuilder::with_capacity(block.len() + 128);
-        let block_vec = fbb.create_vector(block);
-        let request = SubmitMinedBlockRequest::create(
-            &mut fbb,
-            &SubmitMinedBlockRequestArgs {
-                block: Some(block_vec),
-            },
-        );
-        let rpc_call = RpcCall::create(
-            &mut fbb,
-            &RpcCallArgs {
-                rpc_type: RpcRequest::SubmitMinedBlockRequest,
-                rpc: Some(request.as_union_value()),
-            },
-        );
-        fbb.finish(rpc_call, None);
-        let msg = self.tranceive(&fbb)?;
-        let response = flatbuffers::root_with_opts::<SubmitMinedBlockResponse>(
-            &self.fbb_opts,
-            self.handle_msg(&msg)?,
-        )?;
-        Ok(structs::SubmitMinedBlockResult {
-            result: map_submit_result(response.result()),
-            accepted: response.accepted(),
-            reject_reason: response
-                .reject_reason()
-                .map(|s| s.to_string())
-                .unwrap_or_default(),
-            block_hash: bitcoinsuite_core::Sha256d::new(
-                response
-                    .block_hash()
-                    .field("SubmitMinedBlockResponse.block_hash")?
-                    .hash()
-                    .field("SubmitMinedBlockResponse.block_hash.hash")?
-                    .0,
-            ),
-        })
-    }
-
-    pub fn validate_mined_block_proposal(
-        &self,
-        block: &[u8],
-    ) -> Result<structs::ValidateMinedBlockProposalResult> {
-        let mut fbb = flatbuffers::FlatBufferBuilder::with_capacity(block.len() + 128);
-        let block_vec = fbb.create_vector(block);
-        let request = ValidateMinedBlockProposalRequest::create(
-            &mut fbb,
-            &ValidateMinedBlockProposalRequestArgs {
-                block: Some(block_vec),
-            },
-        );
-        let rpc_call = RpcCall::create(
-            &mut fbb,
-            &RpcCallArgs {
-                rpc_type: RpcRequest::ValidateMinedBlockProposalRequest,
-                rpc: Some(request.as_union_value()),
-            },
-        );
-        fbb.finish(rpc_call, None);
-        let msg = self.tranceive(&fbb)?;
-        let response = flatbuffers::root_with_opts::<ValidateMinedBlockProposalResponse>(
-            &self.fbb_opts,
-            self.handle_msg(&msg)?,
-        )?;
-        Ok(structs::ValidateMinedBlockProposalResult {
-            result: map_submit_result(response.result()),
-            valid: response.valid(),
-            reject_reason: response
-                .reject_reason()
-                .map(|s| s.to_string())
-                .unwrap_or_default(),
-        })
-    }
-
     fn tranceive(&self, fbb: &flatbuffers::FlatBufferBuilder) -> Result<Message> {
         self.tranceive_raw(fbb.finished_data())
     }
@@ -438,25 +361,6 @@ impl RpcInterface {
             }
             .into())
         }
-    }
-}
-
-fn map_submit_result(
-    v: crate::nng_interface_generated::nng_interface::MiningSubmitResult,
-) -> structs::MiningSubmitResult {
-    use crate::nng_interface_generated::nng_interface::MiningSubmitResult as Fbs;
-    match v {
-        Fbs::ACCEPTED => structs::MiningSubmitResult::Accepted,
-        Fbs::DUPLICATE => structs::MiningSubmitResult::Duplicate,
-        Fbs::DUPLICATE_INVALID => structs::MiningSubmitResult::DuplicateInvalid,
-        Fbs::DUPLICATE_INCONCLUSIVE => structs::MiningSubmitResult::DuplicateInconclusive,
-        Fbs::INCONCLUSIVE => structs::MiningSubmitResult::Inconclusive,
-        Fbs::REJECTED => structs::MiningSubmitResult::Rejected,
-        Fbs::DESERIALIZATION_ERROR => structs::MiningSubmitResult::DeserializationError,
-        Fbs::INVALID_BLOCK => structs::MiningSubmitResult::InvalidBlock,
-        Fbs::INVALID_COINBASE => structs::MiningSubmitResult::InvalidCoinbase,
-        Fbs::INVALID_PREV_BLOCK => structs::MiningSubmitResult::InvalidPrevBlock,
-        _ => structs::MiningSubmitResult::Unknown(v.0),
     }
 }
 

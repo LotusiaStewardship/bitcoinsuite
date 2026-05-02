@@ -124,33 +124,3 @@ pub struct MiningTemplate {
     pub ntime_stratum: String,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum MiningSubmitResult {
-    Accepted,
-    Duplicate,
-    DuplicateInvalid,
-    DuplicateInconclusive,
-    Inconclusive,
-    Rejected,
-    DeserializationError,
-    InvalidBlock,
-    InvalidCoinbase,
-    InvalidPrevBlock,
-    Unknown(i32),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct SubmitMinedBlockResult {
-    pub result: MiningSubmitResult,
-    pub accepted: bool,
-    pub reject_reason: String,
-    pub block_hash: Sha256d,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ValidateMinedBlockProposalResult {
-    pub result: MiningSubmitResult,
-    pub valid: bool,
-    pub reject_reason: String,
-}
-
