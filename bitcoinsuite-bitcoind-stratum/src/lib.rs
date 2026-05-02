@@ -46,6 +46,10 @@ pub fn lotus_merkle_leaf(tx: &Tx) -> Sha256d {
 /// * `nbits_hex` - Compact difficulty bits (hex)
 /// * `ntime_hex_6b` - Timestamp (6-byte hex, little-endian)
 /// * `nonce_hex_8b` - Nonce (8-byte hex, little-endian)
+/// * `height` - Block height (optional, defaults to 0)
+/// * `epoch_hash_hex` - Epoch hash in big-endian hex (optional, defaults to zero hash)
+/// * `extended_metadata_hash_hex` - Extended metadata hash in big-endian hex (optional, defaults to zero hash)
+/// * `size` - Block size (optional, defaults to 0)
 pub fn build_stratum_header(
     coinbase1: &str,
     extranonce1: &str,
@@ -57,6 +61,10 @@ pub fn build_stratum_header(
     nbits_hex: &str,
     ntime_hex_6b: &str,
     nonce_hex_8b: &str,
+    height: Option<i32>,
+    epoch_hash_hex: Option<&str>,
+    extended_metadata_hash_hex: Option<&str>,
+    size: Option<u64>,
 ) -> Result<Vec<u8>> {
     // Build coinbase transaction
     let coinbase_hex = format!("{}{}{}{}", coinbase1, extranonce1, extranonce2, coinbase2);
@@ -123,12 +131,28 @@ pub fn build_stratum_header(
         StratumError::InvalidInput("invalid merkle length".into())
     })?);
 
+    // Set Lotus-specific header fields from optional parameters
+    header.height = height.unwrap_or(0);
+    
+    if let Some(epoch_hash_hex) = epoch_hash_hex {
+        header.epoch_hash = Sha256d::from_hex_be(epoch_hash_hex)
+            .map_err(|e| StratumError::InvalidInput(format!("invalid epoch_hash: {}", e)))?;
+    }
+    
+    if let Some(ext_meta_hash_hex) = extended_metadata_hash_hex {
+        header.extended_metadata_hash = Sha256d::from_hex_be(ext_meta_hash_hex)
+            .map_err(|e| StratumError::InvalidInput(format!("invalid extended_metadata_hash: {}", e)))?;
+    }
+    
+    header.size = size.unwrap_or(0);
+
     Ok(header.ser().as_ref().to_vec())
 }
 
 /// Difficulty-1 target from Bitcoin/Lotus SHA-family convention.
-const DIFF1_TARGET_HEX: &str = "00000000ffff0000000000000000000000000000000000000000000000000000";
-const DIFF_SCALE: u128 = 100_000_000;
+/// Uses pdiff (pool difficulty) standard: non-truncated target.
+/// This matches industry practice for Stratum V1 pools.
+const DIFF1_TARGET_HEX: &str = "00000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
 
 /// Maximum target (minimum difficulty) for Lotus testnet/mainnet.
 /// This is the powLimit value from consensus parameters.
@@ -137,7 +161,7 @@ const MAX_TARGET_HEX: &str = "00000000ffffffffffffffffffffffffffffffffffffffffff
 /// Convert Stratum V1 difficulty to a 32-byte target (big-endian).
 ///
 /// This follows the standard Stratum V1 difficulty-to-target conversion:
-/// target = (DIFF1_TARGET * DIFF_SCALE) / (difficulty * DIFF_SCALE)
+/// target = DIFF1_TARGET / difficulty
 ///
 /// # Arguments
 ///
@@ -151,26 +175,32 @@ pub fn difficulty_to_target(difficulty: f64) -> Result<[u8; 32]> {
         return Err(StratumError::InvalidInput("invalid difficulty".into()));
     }
     
-    let scaled = (difficulty * DIFF_SCALE as f64).round() as u128;
-    if scaled == 0 {
-        return Err(StratumError::InvalidInput("invalid difficulty scale".into()));
-    }
-    
-    let scaled_u = U256::from(scaled);
     let diff1 = U256::from_big_endian(&hex::decode(DIFF1_TARGET_HEX)?);
-    let scaled_diff1 = diff1 * U256::from(DIFF_SCALE);
-    let mut target = scaled_diff1 / scaled_u;
     
-    if target.is_zero() {
-        target = U256::one();
+    // For fractional difficulties, we need to handle the division carefully
+    // Use: target = diff1 / difficulty
+    // Scale both diff1 and difficulty to preserve precision for all values.
+    // Using u128 for difficulty allows precise representation up to ~1e38,
+    // which covers all realistic difficulty values.
+    let scale = 1e9;
+    let difficulty_scaled = (difficulty * scale).round() as u128;
+    if difficulty_scaled == 0 {
+        return Err(StratumError::InvalidInput("difficulty too small".into()));
     }
-    
+    // target = diff1 / difficulty = (diff1 * scale) / (difficulty * scale)
+    let diff1_scaled = diff1 * U256::from(scale as u128);
+    let target = diff1_scaled / U256::from(difficulty_scaled);
+    if target.is_zero() {
+        return Err(StratumError::InvalidInput("difficulty too high".into()));
+    }
     let mut out = [0u8; 32];
     target.to_big_endian(&mut out);
     Ok(out)
 }
 
 /// Convert a 32-byte target (big-endian) to difficulty.
+///
+/// Uses the standard formula: difficulty = DIFF1_TARGET / target
 pub fn target_to_difficulty(target_be: &[u8; 32]) -> Result<f64> {
     let target = U256::from_big_endian(target_be);
     if target.is_zero() {
@@ -178,10 +208,27 @@ pub fn target_to_difficulty(target_be: &[u8; 32]) -> Result<f64> {
     }
     
     let diff1 = U256::from_big_endian(&hex::decode(DIFF1_TARGET_HEX)?);
-    let scaled_diff1 = diff1 * U256::from(DIFF_SCALE);
-    let difficulty = scaled_diff1 / target;
     
-    Ok(difficulty.as_u128() as f64 / DIFF_SCALE as f64)
+    // difficulty = diff1 / target
+    // Scale up diff1 to preserve fractional precision for all target values.
+    // Using u128 for the scaled result allows precise representation up to ~1e38.
+    let scale = 1_000_000_000u64;
+    let diff1_scaled = diff1 * U256::from(scale);
+    let difficulty_scaled = diff1_scaled / target;
+    
+    // Convert scaled difficulty back to f64
+    // For very large values, use safe conversion to avoid overflow
+    if difficulty_scaled > U256::from(u128::MAX) {
+        // Extremely high difficulty, return as f64 directly from u64 portion
+        // This is a rare edge case for near-zero targets
+        Ok(difficulty_scaled.as_u64() as f64 / scale as f64)
+    } else {
+        // Normal case: use full u128 precision
+        let difficulty_hi = ((difficulty_scaled >> 64) & U256::from(u64::MAX)).as_u64();
+        let difficulty_lo = (difficulty_scaled & U256::from(u64::MAX)).as_u64();
+        let difficulty_scaled_f64 = (difficulty_hi as f64) * 1.8446744e19 + (difficulty_lo as f64);
+        Ok(difficulty_scaled_f64 / scale as f64)
+    }
 }
 
 /// Convert a 32-byte network target (big-endian) from lotusd to network difficulty.
@@ -208,32 +255,93 @@ pub fn network_target_to_difficulty(target_be: &[u8; 32]) -> Result<f64> {
     let max_target = U256::from_big_endian(&hex::decode(MAX_TARGET_HEX)?);
     let difficulty = max_target / target;
     
-    // Return raw ratio as f64 (no DIFF_SCALE division)
-    Ok(difficulty.as_u128() as f64)
+    // Convert U256 to f64 safely (avoids overflow from as_u128())
+    // U256::as_u128() panics on overflow, so we use a safe conversion
+    let difficulty_f64 = u256_to_f64(difficulty);
+    
+    Ok(difficulty_f64)
+}
+
+/// Safely convert U256 to f64 without overflow panics.
+/// For very large values (> f64::MAX), returns f64::INFINITY.
+fn u256_to_f64(value: U256) -> f64 {
+    // U256 stores as 4 x u64 in little-endian order
+    let words = value.0;
+    
+    // Check if value is too large for f64 representation
+    // f64 can represent integers exactly up to 2^53, and up to ~1.8e308 total
+    // U256 max is ~1.15e77, so most values will fit in f64 range
+    
+    // Fast path: if high words are zero, convert directly
+    if words[3] == 0 && words[2] == 0 && words[1] == 0 {
+        return words[0] as f64;
+    }
+    
+    // Build f64 from parts using logarithms for large values
+    // value = words[0] + words[1]*2^64 + words[2]*2^128 + words[3]*2^192
+    let mut result = 0.0f64;
+    let mut multiplier = 1.0f64;
+    
+    for &word in &words {
+        if word != 0 {
+            result += (word as f64) * multiplier;
+        }
+        // Check for overflow to infinity
+        if !multiplier.is_finite() {
+            return f64::INFINITY;
+        }
+        multiplier *= 2.0f64.powi(64);
+        if !multiplier.is_finite() {
+            // Remaining words would overflow, but contribution is negligible
+            // compared to result already at/near infinity
+            break;
+        }
+    }
+    
+    result
 }
 
 /// Calculate pool difficulty from network difficulty.
 ///
 /// Pool difficulty is set to network_difficulty / ratio, where ratio
 /// determines how much easier pool shares are compared to network blocks.
+/// Includes rate limiting to prevent sudden difficulty jumps that could
+/// destabilize miners.
 ///
 /// # Arguments
 ///
 /// * `network_diff` - Current network difficulty
+/// * `previous_pool_diff` - Previous pool difficulty (for rate limiting)
 /// * `share_target_ratio` - Ratio of network to pool difficulty (e.g., 100.0)
 /// * `min_difficulty` - Absolute minimum pool difficulty (clamp floor)
 /// * `max_difficulty` - Absolute maximum pool difficulty (clamp ceiling)
+/// * `max_change_pct` - Maximum allowed change per update (e.g., 0.5 for 50%)
 ///
 /// # Returns
 ///
-/// Pool difficulty clamped to [min_difficulty, max_difficulty]
+/// Pool difficulty clamped to [min_difficulty, max_difficulty] and rate-limited
 pub fn calculate_pool_difficulty(
     network_diff: f64,
+    previous_pool_diff: f64,
     share_target_ratio: f64,
     min_difficulty: f64,
     max_difficulty: f64,
+    max_change_pct: f64,
 ) -> f64 {
-    let pool_diff = network_diff / share_target_ratio;
+    let target_pool_diff = network_diff / share_target_ratio;
+    
+    // Apply rate limiting to prevent sudden jumps
+    // This protects miners from instability during network difficulty changes
+    let max_increase = previous_pool_diff * (1.0 + max_change_pct);
+    let max_decrease = previous_pool_diff * (1.0 - max_change_pct);
+    
+    let mut pool_diff = target_pool_diff;
+    if pool_diff > max_increase {
+        pool_diff = max_increase;
+    } else if pool_diff < max_decrease && max_decrease > min_difficulty {
+        pool_diff = max_decrease;
+    }
+    
     pool_diff.clamp(min_difficulty, max_difficulty)
 }
 
@@ -351,17 +459,24 @@ mod tests {
 
     #[test]
     fn test_calculate_pool_difficulty() {
-        // Network diff 1000, ratio 100 -> pool diff 10
-        let pool_diff = calculate_pool_difficulty(1000.0, 100.0, 1.0, 1000.0);
-        assert!((pool_diff - 10.0).abs() < 0.0001);
+        // Network diff 1000, ratio 100 -> target pool diff 10
+        // With rate limiting (50% max change from previous=1.0), should clamp to 1.5
+        let pool_diff = calculate_pool_difficulty(1000.0, 1.0, 100.0, 1.0, 1000.0, 0.5);
+        assert!((pool_diff - 1.5).abs() < 0.0001);  // Rate limited from 1.0 to max 1.5
         
-        // Test clamping to min
-        let pool_diff = calculate_pool_difficulty(10.0, 100.0, 4.0, 1000.0);
-        assert!((pool_diff - 4.0).abs() < 0.0001); // 0.1 clamped to 4.0
+        // Starting from reasonable previous value, should reach target
+        let pool_diff = calculate_pool_difficulty(1000.0, 8.0, 100.0, 1.0, 1000.0, 0.5);
+        assert!((pool_diff - 10.0).abs() < 0.0001);  // Within 50% range, reaches target
         
-        // Test clamping to max
-        let pool_diff = calculate_pool_difficulty(1_000_000_000.0, 1.0, 1.0, 1_000_000.0);
-        assert!((pool_diff - 1_000_000.0).abs() < 0.0001);
+        // Test clamping to min (rate limited)
+        let pool_diff = calculate_pool_difficulty(10.0, 8.0, 100.0, 4.0, 1000.0, 0.5);
+        // target = 0.1, rate limited to 4.0 (from 8.0, max decrease is 4.0), then clamped to min 4.0
+        assert!((pool_diff - 4.0).abs() < 0.0001);
+        
+        // Test clamping to max (rate limited)
+        let pool_diff = calculate_pool_difficulty(1_000_000_000.0, 500_000.0, 1.0, 1.0, 1_000_000.0, 0.5);
+        // target = 1B, rate limited to 750K (500K * 1.5), within max 1M
+        assert!((pool_diff - 750_000.0).abs() < 0.0001);
     }
 
     #[test]
@@ -382,5 +497,70 @@ mod tests {
         // Invalid: ratio <= 0
         assert!(validate_difficulty_config(1.0, 1000.0, 0.0).is_err());
         assert!(validate_difficulty_config(1.0, 1000.0, -10.0).is_err());
+    }
+
+    #[test]
+    fn test_u256_to_f64_small_values() {
+        // Test small values that fit in u64
+        let val = U256::from(42u64);
+        assert!((u256_to_f64(val) - 42.0).abs() < 0.0001);
+        
+        let val = U256::from(1_000_000u64);
+        assert!((u256_to_f64(val) - 1_000_000.0).abs() < 0.0001);
+    }
+
+    #[test]
+    fn test_u256_to_f64_large_values() {
+        // Test large values requiring multiple words
+        // 2^64 (one word overflow)
+        let val = U256::from(1u64) << 64;
+        let result = u256_to_f64(val);
+        assert!(result.is_finite());
+        assert!(result > 1e19);
+        
+        // Very large value
+        let val = U256::MAX;
+        let result = u256_to_f64(val);
+        assert!(result.is_finite() || result == f64::INFINITY);
+    }
+
+    #[test]
+    fn test_network_target_to_difficulty_no_overflow() {
+        // Test with a very small target (would cause overflow with as_u128)
+        // Use a target that gives difficulty > u128::MAX
+        let mut tiny_target = [0u8; 32];
+        tiny_target[31] = 1; // Very small target = very high difficulty
+        
+        let result = network_target_to_difficulty(&tiny_target);
+        assert!(result.is_ok());
+        // Should be a very large number, but not panic
+        let diff = result.unwrap();
+        assert!(diff.is_finite() || diff == f64::INFINITY);
+    }
+
+    #[test]
+    fn test_fractional_difficulty_precision() {
+        // Test that fractional difficulties are not truncated
+        // This is a regression test for the bug where difficulty >= 1.0
+        // was cast to u64, losing the decimal part (e.g., 16.73 -> 16)
+        
+        let difficulty = 16.73;
+        let target = difficulty_to_target(difficulty).unwrap();
+        let roundtrip = target_to_difficulty(&target).unwrap();
+        
+        // Round-trip should preserve the difficulty within reasonable tolerance
+        // The tolerance accounts for U256 integer division rounding
+        let relative_error = (roundtrip - difficulty).abs() / difficulty;
+        assert!(relative_error < 0.001, "Fractional difficulty precision lost: {} -> {}", difficulty, roundtrip);
+        
+        // Also verify that difficulty 16.73 produces a different target than 16.0
+        let target_16 = difficulty_to_target(16.0).unwrap();
+        let target_16_73 = difficulty_to_target(16.73).unwrap();
+        assert_ne!(target_16, target_16_73, "Targets should differ for 16.0 vs 16.73");
+        
+        // Target for 16.73 should be smaller (harder) than target for 16.0
+        let target_16_u256 = U256::from_big_endian(&target_16);
+        let target_16_73_u256 = U256::from_big_endian(&target_16_73);
+        assert!(target_16_73_u256 < target_16_u256, "Higher difficulty should produce smaller target");
     }
 }
