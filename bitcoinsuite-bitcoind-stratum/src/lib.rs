@@ -78,7 +78,10 @@ pub fn build_stratum_header(
     let mut merkle = leaf.as_ref().to_vec();
     
     for branch_hex in merkle_branches {
-        let branch = hex::decode(branch_hex)?;
+        let mut branch = hex::decode(branch_hex)?;
+        // Branches are stored as big-endian hex (via GetHex() in lotusd), but hashing
+        // expects little-endian byte order (internal representation). Reverse.
+        branch.reverse();
         let mut concat = Vec::with_capacity(64);
         concat.extend_from_slice(&merkle);
         concat.extend_from_slice(&branch);
