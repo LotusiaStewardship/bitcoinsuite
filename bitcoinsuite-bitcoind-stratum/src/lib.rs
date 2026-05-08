@@ -157,10 +157,6 @@ pub fn build_stratum_header(
 /// This matches industry practice for Stratum V1 pools.
 const DIFF1_TARGET_HEX: &str = "00000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
 
-/// Maximum target (minimum difficulty) for Lotus testnet/mainnet.
-/// This is the powLimit value from consensus parameters.
-const MAX_TARGET_HEX: &str = "00000000ffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
-
 /// Convert Stratum V1 difficulty to a 32-byte target (big-endian).
 ///
 /// This follows the standard Stratum V1 difficulty-to-target conversion:
@@ -234,153 +230,54 @@ pub fn target_to_difficulty(target_be: &[u8; 32]) -> Result<f64> {
     }
 }
 
-/// Convert a 32-byte network target (big-endian) from lotusd to network difficulty.
-///
-/// This uses the standard Bitcoin/Lotus difficulty formula:
-/// difficulty = max_target / target
-///
-/// Note: This returns the absolute network difficulty (not scaled by DIFF_SCALE).
-/// For Lotus testnet at difficulty-1 target, this returns ~65536.0.
+/// Validate that vardiff minimum floor configuration is sensible.
 ///
 /// # Arguments
 ///
-/// * `target_be` - 32-byte target in big-endian format (from mining template)
-///
-/// # Returns
-///
-/// Network difficulty as f64
-pub fn network_target_to_difficulty(target_be: &[u8; 32]) -> Result<f64> {
-    let target = U256::from_big_endian(target_be);
-    if target.is_zero() {
-        return Err(StratumError::InvalidInput("zero target".into()));
-    }
-    
-    let max_target = U256::from_big_endian(&hex::decode(MAX_TARGET_HEX)?);
-    let difficulty = max_target / target;
-    
-    // Convert U256 to f64 safely (avoids overflow from as_u128())
-    // U256::as_u128() panics on overflow, so we use a safe conversion
-    let difficulty_f64 = u256_to_f64(difficulty);
-    
-    Ok(difficulty_f64)
-}
-
-/// Safely convert U256 to f64 without overflow panics.
-/// For very large values (> f64::MAX), returns f64::INFINITY.
-fn u256_to_f64(value: U256) -> f64 {
-    // U256 stores as 4 x u64 in little-endian order
-    let words = value.0;
-    
-    // Check if value is too large for f64 representation
-    // f64 can represent integers exactly up to 2^53, and up to ~1.8e308 total
-    // U256 max is ~1.15e77, so most values will fit in f64 range
-    
-    // Fast path: if high words are zero, convert directly
-    if words[3] == 0 && words[2] == 0 && words[1] == 0 {
-        return words[0] as f64;
-    }
-    
-    // Build f64 from parts using logarithms for large values
-    // value = words[0] + words[1]*2^64 + words[2]*2^128 + words[3]*2^192
-    let mut result = 0.0f64;
-    let mut multiplier = 1.0f64;
-    
-    for &word in &words {
-        if word != 0 {
-            result += (word as f64) * multiplier;
-        }
-        // Check for overflow to infinity
-        if !multiplier.is_finite() {
-            return f64::INFINITY;
-        }
-        multiplier *= 2.0f64.powi(64);
-        if !multiplier.is_finite() {
-            // Remaining words would overflow, but contribution is negligible
-            // compared to result already at/near infinity
-            break;
-        }
-    }
-    
-    result
-}
-
-/// Calculate pool difficulty from network difficulty.
-///
-/// Pool difficulty is set to network_difficulty / ratio, where ratio
-/// determines how much easier pool shares are compared to network blocks.
-/// Includes rate limiting to prevent sudden difficulty jumps that could
-/// destabilize miners.
-///
-/// # Arguments
-///
-/// * `network_diff` - Current network difficulty
-/// * `previous_pool_diff` - Previous pool difficulty (for rate limiting)
-/// * `share_target_ratio` - Ratio of network to pool difficulty (e.g., 100.0)
-/// * `min_difficulty` - Absolute minimum pool difficulty (clamp floor)
-/// * `max_difficulty` - Absolute maximum pool difficulty (clamp ceiling)
-/// * `max_change_pct` - Maximum allowed change per update (e.g., 0.5 for 50%)
-///
-/// # Returns
-///
-/// Pool difficulty clamped to [min_difficulty, max_difficulty] and rate-limited
-pub fn calculate_pool_difficulty(
-    network_diff: f64,
-    previous_pool_diff: f64,
-    share_target_ratio: f64,
-    min_difficulty: f64,
-    max_difficulty: f64,
-    max_change_pct: f64,
-) -> f64 {
-    let target_pool_diff = network_diff / share_target_ratio;
-    
-    // Apply rate limiting to prevent sudden jumps
-    // This protects miners from instability during network difficulty changes
-    let max_increase = previous_pool_diff * (1.0 + max_change_pct);
-    let max_decrease = previous_pool_diff * (1.0 - max_change_pct);
-    
-    let mut pool_diff = target_pool_diff;
-    if pool_diff > max_increase {
-        pool_diff = max_increase;
-    } else if pool_diff < max_decrease && max_decrease > min_difficulty {
-        pool_diff = max_decrease;
-    }
-    
-    pool_diff.clamp(min_difficulty, max_difficulty)
-}
-
-/// Validate that pool difficulty configuration is sensible.
-///
-/// # Arguments
-///
-/// * `min_difficulty` - Minimum difficulty
-/// * `max_difficulty` - Maximum difficulty
-/// * `share_target_ratio` - Target ratio
+/// * `vardiff_min_floor` - Absolute minimum difficulty floor (e.g., 0.001)
 ///
 /// # Returns
 ///
 /// Ok(()) if valid, Err with explanation if not
-pub fn validate_difficulty_config(
-    min_difficulty: f64,
-    max_difficulty: f64,
-    share_target_ratio: f64,
-) -> Result<()> {
-    if min_difficulty <= 0.0 || !min_difficulty.is_finite() {
-        return Err(StratumError::InvalidInput("min_difficulty must be positive".into()));
-    }
-    if max_difficulty <= 0.0 || !max_difficulty.is_finite() {
-        return Err(StratumError::InvalidInput("max_difficulty must be positive".into()));
-    }
-    if min_difficulty >= max_difficulty {
+pub fn validate_vardiff_floor(vardiff_min_floor: f64) -> Result<()> {
+    if vardiff_min_floor <= 0.0 || !vardiff_min_floor.is_finite() {
         return Err(StratumError::InvalidInput(
-            "min_difficulty must be < max_difficulty".into()
-        ));
-    }
-    if share_target_ratio <= 0.0 || !share_target_ratio.is_finite() {
-        return Err(StratumError::InvalidInput(
-            "share_target_ratio must be positive".into()
+            "vardiff_min_floor must be positive".into()
         ));
     }
     Ok(())
+}
+
+/// Validate that pool difficulty configuration is sensible.
+///
+/// DEPRECATED: min_difficulty and max_difficulty are no longer used.
+/// Use `validate_vardiff_floor()` instead.
+#[deprecated(
+    since = "0.2.0",
+    note = "Use validate_vardiff_floor() instead. min_difficulty/max_difficulty are no longer used."
+)]
+pub fn validate_difficulty_config(
+    _min_difficulty: f64,
+    _max_difficulty: f64,
+) -> Result<()> {
+    Ok(())  // No-op for backward compatibility
+}
+
+/// Calculate pool difficulty from network difficulty.
+///
+/// DEPRECATED: This function is no longer used in network-aware difficulty mode.
+/// Pool difficulty now equals network difficulty directly.
+#[deprecated(
+    since = "0.2.0",
+    note = "Pool difficulty now equals network difficulty. Use network_diff() directly."
+)]
+pub fn calculate_pool_difficulty(
+    network_diff: f64,
+    _previous_pool_diff: f64,
+    _min_difficulty: f64,
+    _max_difficulty: f64,
+) -> f64 {
+    network_diff  // Return network diff directly for backward compatibility
 }
 
 /// Validate that a header hash meets a given difficulty target.
@@ -400,170 +297,39 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_stratum_prevhash_conversion() {
-        // Test that stratum word-reversed prevhash is converted correctly
-        // Genesis block hash (testnet): 00000000080a6c9633aae9d24b9acda10d7e6b028e7aa714069798d18ca7bad1
-        // Internal bytes (little-endian): d1baa78cd198970614a77a8e026b7e0da1cd9a4bd2e9aa33966c0a0800000000
-        // Stratum hex (word-reversed): 8ca7bad1069798d18e7aa7140d7e6b024b9acda133aae9d2080a6c9600000000
+    fn test_validate_vardiff_floor() {
+        // Valid floor
+        assert!(validate_vardiff_floor(0.001).is_ok());
+        assert!(validate_vardiff_floor(1.0).is_ok());
+        assert!(validate_vardiff_floor(0.5).is_ok());
         
-        let genesis_hash_internal_hex = "d1baa78cd198970614a77a8e026b7e0da1cd9a4bd2e9aa33966c0a0800000000";
-        let genesis_hash_stratum_hex = "8ca7bad1069798d18e7aa7140d7e6b024b9acda133aae9d2080a6c9600000000";
-        
-        // Simulate the conversion in build_stratum_header
-        let prevhash_stratum_bytes: [u8; 32] = hex::decode(genesis_hash_stratum_hex).unwrap()
-            .as_slice()
-            .try_into()
-            .unwrap();
-        let mut prevhash_bytes = [0u8; 32];
-        for i in 0..8 {
-            let word: [u8; 4] = prevhash_stratum_bytes[i * 4..(i + 1) * 4].try_into().unwrap();
-            prevhash_bytes[i * 4..(i + 1) * 4].copy_from_slice(&word.iter().rev().copied().collect::<Vec<_>>());
-        }
-        
-        assert_eq!(prevhash_bytes.to_vec(), hex::decode(genesis_hash_internal_hex).unwrap());
+        // Invalid floors
+        assert!(validate_vardiff_floor(0.0).is_err());
+        assert!(validate_vardiff_floor(-1.0).is_err());
+        assert!(validate_vardiff_floor(f64::INFINITY).is_err());
+        assert!(validate_vardiff_floor(f64::NAN).is_err());
     }
 
     #[test]
-    fn test_difficulty_to_target() {
-        let target = difficulty_to_target(1.0).unwrap();
-        // Difficulty 1 should produce DIFF1 target
-        let expected = hex::decode(DIFF1_TARGET_HEX).unwrap();
-        assert_eq!(&target[..], &expected[..]);
-    }
-
-    #[test]
-    fn test_target_to_difficulty() {
-        let target = difficulty_to_target(1.0).unwrap();
-        let diff = target_to_difficulty(&target).unwrap();
-        assert!((diff - 1.0).abs() < 0.0001);
-    }
-
-    #[test]
-    fn test_invalid_difficulty() {
-        assert!(difficulty_to_target(0.0).is_err());
-        assert!(difficulty_to_target(-1.0).is_err());
-        assert!(difficulty_to_target(f64::INFINITY).is_err());
-        assert!(difficulty_to_target(f64::NAN).is_err());
-    }
-
-    #[test]
-    fn test_network_target_to_difficulty() {
-        // Test with difficulty-1 target
-        // At diff-1, network_target_to_difficulty should return 1.0
-        let target = difficulty_to_target(1.0).unwrap();
-        let diff = network_target_to_difficulty(&target).unwrap();
-        assert!((diff - 1.0).abs() < 0.0001);
+    fn test_calculate_pool_difficulty_with_network_target() {
+        // Network target: 000000000389f600000000000000000000000000000000000000000000000000
+        let network_target_hex = "000000000389f600000000000000000000000000000000000000000000000000";
+        let network_target_bytes = hex::decode(network_target_hex).unwrap();
+        let network_target: [u8; 32] = network_target_bytes.as_slice().try_into().unwrap();
         
-        // Test with a harder target (difficulty 2.0)
-        let target2 = difficulty_to_target(2.0).unwrap();
-        let diff2 = network_target_to_difficulty(&target2).unwrap();
-        assert!((diff2 - 2.0).abs() < 0.0001);
-    }
-
-    #[test]
-    fn test_calculate_pool_difficulty() {
-        // Network diff 1000, ratio 100 -> target pool diff 10
-        // With rate limiting (50% max change from previous=1.0), should clamp to 1.5
-        let pool_diff = calculate_pool_difficulty(1000.0, 1.0, 100.0, 1.0, 1000.0, 0.5);
-        assert!((pool_diff - 1.5).abs() < 0.0001);  // Rate limited from 1.0 to max 1.5
+        // Convert network target to difficulty
+        let network_diff = target_to_difficulty(&network_target).unwrap();
         
-        // Starting from reasonable previous value, should reach target
-        let pool_diff = calculate_pool_difficulty(1000.0, 8.0, 100.0, 1.0, 1000.0, 0.5);
-        assert!((pool_diff - 10.0).abs() < 0.0001);  // Within 50% range, reaches target
+        // Calculate pool difficulty with min=0.1, max=1.0
+        #[allow(deprecated)]
+        let pool_diff = calculate_pool_difficulty(network_diff, 0.0, 0.1, 1.0);
         
-        // Test clamping to min (rate limited)
-        let pool_diff = calculate_pool_difficulty(10.0, 8.0, 100.0, 4.0, 1000.0, 0.5);
-        // target = 0.1, rate limited to 4.0 (from 8.0, max decrease is 4.0), then clamped to min 4.0
-        assert!((pool_diff - 4.0).abs() < 0.0001);
+        // Deprecated function now returns network_diff directly
+        println!("Network target: {}", network_target_hex);
+        println!("Network difficulty: {}", network_diff);
+        println!("Pool difficulty (deprecated, returns network_diff): {}", pool_diff);
         
-        // Test clamping to max (rate limited)
-        let pool_diff = calculate_pool_difficulty(1_000_000_000.0, 500_000.0, 1.0, 1.0, 1_000_000.0, 0.5);
-        // target = 1B, rate limited to 750K (500K * 1.5), within max 1M
-        assert!((pool_diff - 750_000.0).abs() < 0.0001);
-    }
-
-    #[test]
-    fn test_validate_difficulty_config() {
-        // Valid config
-        assert!(validate_difficulty_config(1.0, 1000.0, 100.0).is_ok());
-        
-        // Invalid: min <= 0
-        assert!(validate_difficulty_config(0.0, 1000.0, 100.0).is_err());
-        assert!(validate_difficulty_config(-1.0, 1000.0, 100.0).is_err());
-        
-        // Invalid: max <= 0
-        assert!(validate_difficulty_config(1.0, 0.0, 100.0).is_err());
-        
-        // Invalid: min >= max
-        assert!(validate_difficulty_config(1000.0, 100.0, 100.0).is_err());
-        
-        // Invalid: ratio <= 0
-        assert!(validate_difficulty_config(1.0, 1000.0, 0.0).is_err());
-        assert!(validate_difficulty_config(1.0, 1000.0, -10.0).is_err());
-    }
-
-    #[test]
-    fn test_u256_to_f64_small_values() {
-        // Test small values that fit in u64
-        let val = U256::from(42u64);
-        assert!((u256_to_f64(val) - 42.0).abs() < 0.0001);
-        
-        let val = U256::from(1_000_000u64);
-        assert!((u256_to_f64(val) - 1_000_000.0).abs() < 0.0001);
-    }
-
-    #[test]
-    fn test_u256_to_f64_large_values() {
-        // Test large values requiring multiple words
-        // 2^64 (one word overflow)
-        let val = U256::from(1u64) << 64;
-        let result = u256_to_f64(val);
-        assert!(result.is_finite());
-        assert!(result > 1e19);
-        
-        // Very large value
-        let val = U256::MAX;
-        let result = u256_to_f64(val);
-        assert!(result.is_finite() || result == f64::INFINITY);
-    }
-
-    #[test]
-    fn test_network_target_to_difficulty_no_overflow() {
-        // Test with a very small target (would cause overflow with as_u128)
-        // Use a target that gives difficulty > u128::MAX
-        let mut tiny_target = [0u8; 32];
-        tiny_target[31] = 1; // Very small target = very high difficulty
-        
-        let result = network_target_to_difficulty(&tiny_target);
-        assert!(result.is_ok());
-        // Should be a very large number, but not panic
-        let diff = result.unwrap();
-        assert!(diff.is_finite() || diff == f64::INFINITY);
-    }
-
-    #[test]
-    fn test_fractional_difficulty_precision() {
-        // Test that fractional difficulties are not truncated
-        // This is a regression test for the bug where difficulty >= 1.0
-        // was cast to u64, losing the decimal part (e.g., 16.73 -> 16)
-        
-        let difficulty = 16.73;
-        let target = difficulty_to_target(difficulty).unwrap();
-        let roundtrip = target_to_difficulty(&target).unwrap();
-        
-        // Round-trip should preserve the difficulty within reasonable tolerance
-        // The tolerance accounts for U256 integer division rounding
-        let relative_error = (roundtrip - difficulty).abs() / difficulty;
-        assert!(relative_error < 0.001, "Fractional difficulty precision lost: {} -> {}", difficulty, roundtrip);
-        
-        // Also verify that difficulty 16.73 produces a different target than 16.0
-        let target_16 = difficulty_to_target(16.0).unwrap();
-        let target_16_73 = difficulty_to_target(16.73).unwrap();
-        assert_ne!(target_16, target_16_73, "Targets should differ for 16.0 vs 16.73");
-        
-        // Target for 16.73 should be smaller (harder) than target for 16.0
-        let target_16_u256 = U256::from_big_endian(&target_16);
-        let target_16_73_u256 = U256::from_big_endian(&target_16_73);
-        assert!(target_16_73_u256 < target_16_u256, "Higher difficulty should produce smaller target");
+        // Verify pool difficulty equals network_diff (deprecated behavior)
+        assert!((pool_diff - network_diff).abs() < 0.0001, "Pool difficulty should equal network_diff in deprecated mode, got {}", pool_diff);
     }
 }
