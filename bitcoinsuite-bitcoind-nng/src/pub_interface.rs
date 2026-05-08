@@ -3,7 +3,7 @@ use flatbuffers::VerifierOptions;
 use nng::{
     options::{
         protocol::pubsub::{Subscribe, Unsubscribe},
-        Options,
+        RecvBufferSize, Options,
     },
     Protocol, Socket,
 };
@@ -40,6 +40,9 @@ use self::PubInterfaceError::*;
 impl PubInterface {
     pub fn open(pub_url: &str) -> Result<Self> {
         let sock = Socket::new(Protocol::Sub0)?;
+        // Configure receive buffer to 1024 messages to reduce overflow risk
+        // during block bursts or reorgs. This helps preserve event ordering.
+        sock.set_opt::<RecvBufferSize>(1024)?;
         sock.dial(pub_url)?;
         Ok(PubInterface {
             sock,
