@@ -12,8 +12,8 @@ use tokio::sync::mpsc;
 
 use crate::{
     nng_interface_generated::nng_interface::{
-        BlockConnected, BlockDisconnected, ChainStateFlushed, TransactionAddedToMempool,
-        TransactionRemovedFromMempool, UpdatedBlockTip,
+        BlockConnected, BlockDisconnected, ChainStateFlushed, MiningWorkChanged,
+        TransactionAddedToMempool, TransactionRemovedFromMempool, UpdatedBlockTip,
     },
     structs,
 };
@@ -142,6 +142,11 @@ impl PubInterface {
                 let msg =
                     flatbuffers::root_with_opts::<ChainStateFlushed>(&self.fbb_opts, payload)?;
                 structs::Message::ChainStateFlushed(structs::ChainStateFlushed::from_fbs(msg)?)
+            }
+            b"miningwrkchg" => {
+                let msg =
+                    flatbuffers::root_with_opts::<MiningWorkChanged>(&self.fbb_opts, payload)?;
+                structs::Message::MiningWorkChanged(structs::MiningWorkChanged::from_fbs(msg)?)
             }
             _ => {
                 eprintln!("Unknown message prefix: {prefix:?}");

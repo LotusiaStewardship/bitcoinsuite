@@ -5,8 +5,8 @@ use crate::{
     field::OptionExt,
     nng_interface_generated::nng_interface::{
         Block, BlockConnected, BlockDisconnected, BlockHash, BlockHeader, BlockMetadata, BlockTx,
-        ChainStateFlushed, Coin, MempoolTx, TransactionAddedToMempool,
-        TransactionRemovedFromMempool, Tx, TxId, UpdatedBlockTip,
+        ChainStateFlushed, Coin, MempoolTx, MiningWorkChanged, MiningWorkChangeReason,
+        TransactionAddedToMempool, TransactionRemovedFromMempool, Tx, TxId, UpdatedBlockTip,
     },
     structs,
 };
@@ -169,6 +169,34 @@ impl structs::ChainStateFlushed {
             block_hash: hash_from_block_hash(
                 fbs.block_hash().field("ChainStateFlushed.block_hash")?,
             )?,
+        })
+    }
+}
+
+impl structs::MiningWorkChanged {
+    pub fn from_fbs(fbs: MiningWorkChanged) -> Result<Self> {
+        let reason = match fbs.reason() {
+            MiningWorkChangeReason::NEW_TIP => structs::MiningWorkChangedReason::NewTip,
+            MiningWorkChangeReason::REORG => structs::MiningWorkChangedReason::Reorg,
+            MiningWorkChangeReason::MEMPOOL_REFRESH => {
+                structs::MiningWorkChangedReason::MempoolRefresh
+            }
+            MiningWorkChangeReason::MANUAL_INVALIDATION => {
+                structs::MiningWorkChangedReason::ManualInvalidation
+            }
+            _ => structs::MiningWorkChangedReason::MempoolRefresh,
+        };
+        let block_hash = fbs
+            .block_hash()
+            .map(|bh| hash_from_block_hash(bh))
+            .transpose()?
+            .unwrap_or_default();
+        Ok(structs::MiningWorkChanged {
+            reason,
+            block_hash,
+            height: fbs.height(),
+            node_time: fbs.node_time(),
+            template_epoch: fbs.template_epoch(),
         })
     }
 }
