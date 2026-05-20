@@ -216,18 +216,14 @@ pub fn target_to_difficulty(target_be: &[u8; 32]) -> Result<f64> {
     let difficulty_scaled = diff1_scaled / target;
     
     // Convert scaled difficulty back to f64
-    // For very large values, use safe conversion to avoid overflow
-    if difficulty_scaled > U256::from(u128::MAX) {
-        // Extremely high difficulty, return as f64 directly from u64 portion
-        // This is a rare edge case for near-zero targets
-        Ok(difficulty_scaled.as_u64() as f64 / scale as f64)
-    } else {
-        // Normal case: use full u128 precision
-        let difficulty_hi = ((difficulty_scaled >> 64) & U256::from(u64::MAX)).as_u64();
-        let difficulty_lo = (difficulty_scaled & U256::from(u64::MAX)).as_u64();
-        let difficulty_scaled_f64 = (difficulty_hi as f64) * 1.8446744e19 + (difficulty_lo as f64);
-        Ok(difficulty_scaled_f64 / scale as f64)
-    }
+    // Use low_u64() instead of as_u64() throughout: as_u64() panics on overflow
+    // (debug-mode overflow check), while low_u64() always returns the low 64 bits.
+    // For both branches we extract the 128-bit representation (two u64 halves)
+    // and reconstruct as f64, which handles the full range without panicking.
+    let difficulty_hi = (difficulty_scaled >> 64).low_u64();
+    let difficulty_lo = difficulty_scaled.low_u64();
+    let difficulty_scaled_f64 = (difficulty_hi as f64) * 1.8446744e19 + (difficulty_lo as f64);
+    Ok(difficulty_scaled_f64 / scale as f64)
 }
 
 /// Validate that vardiff minimum floor configuration is sensible.
