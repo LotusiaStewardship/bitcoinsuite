@@ -3,3 +3,6 @@
 /downloads
 /data
 /target
+
+# local agent tool permissions
+.senpi
