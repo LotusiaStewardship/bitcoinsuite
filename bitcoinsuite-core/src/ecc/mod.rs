@@ -33,6 +33,9 @@ pub enum EccError {
     InvalidRecoveryId(i32),
     #[error("Failed recovering signature")]
     RecoveryFailed,
+    #[error("Invalid tweak: {0}")]
+    InvalidTweak(String),
+
     #[error("Invalid hex: {0}")]
     Hex(#[from] hex::FromHexError),
 }
@@ -74,6 +77,8 @@ pub trait Ecc {
         recover_id: i32,
         msg: ByteArray<32>,
     ) -> Result<PubKey, EccError>;
+
+    fn tweak_pubkey(&self, pubkey: &mut PubKey, tweak: &[u8; 32]) -> Result<(), EccError>;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -137,5 +142,9 @@ impl Ecc for DummyEcc {
         _msg: ByteArray<32>,
     ) -> Result<PubKey, EccError> {
         unimplemented!()
+    }
+
+    fn tweak_pubkey(&self, _pubkey: &mut PubKey, _tweak: &[u8; 32]) -> Result<(), EccError> {
+        Ok(())
     }
 }

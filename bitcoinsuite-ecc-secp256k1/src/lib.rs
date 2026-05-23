@@ -117,6 +117,15 @@ impl Ecc for EccSecp256k1 {
             .map_err(|_| EccError::RecoveryFailed)?;
         Ok(PubKey::new_unchecked(pubkey.serialize()))
     }
+
+    fn tweak_pubkey(&self, pubkey: &mut PubKey, tweak: &[u8; 32]) -> Result<(), EccError> {
+        let mut pk =
+            PublicKey::from_slice(pubkey.as_slice()).map_err(|_| EccError::InvalidPublicKey)?;
+        pk.add_exp_assign(&self.curve, tweak)
+            .map_err(|e| EccError::InvalidTweak(e.to_string()))?;
+        *pubkey = PubKey::new_unchecked(pk.serialize());
+        Ok(())
+    }
 }
 
 #[cfg(test)]

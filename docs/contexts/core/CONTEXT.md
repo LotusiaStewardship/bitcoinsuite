@@ -62,6 +62,9 @@ src/
 4. **Ecc trait is abstract** — No concrete ECC implementation in core. `DummyEcc` is provided for testing only.
 5. **Network enum is closed** — Adding a new blockchain network requires changing the `Network` enum in `network.rs` and updating all match arms.
 6. **Bytes wrapping bytes crate** — `Bytes` wraps `bytes::Bytes` with serde support, hex output, and split operations. Not the same as `bitcoin::util::misc::serialize`.
+7. **taproot module** — `calculate_tap_tweak()` performs BIP-340 tagged hash for TapTweak computation. Pure SHA256, no ECC context needed.
+8. **Ecc::tweak_pubkey()** — New method on `Ecc` trait: adds a 32-byte scalar to a public key in place. Used for Taproot tweak derivation.
+9. **LotusAddressType::TaprootCommitment = 2** — New address type byte for P2TR addresses in the LotusAddress format. Payload is a 33-byte commitment (not the full script).
 
 ## Key Contracts
 
@@ -72,7 +75,9 @@ src/
 | `Hashed` trait | `digest(BytesMut) -> Self`, `as_slice()`, `from_array()` | Hash computation interface |
 | `Network` enum | `BCH`, `XEC`, `XPI`, `XRG` + `dust_amount()`, `coin_decimals()`, `block_spacing()` | Supported blockchain networks |
 | `Net` enum | `Mainnet`, `Regtest`, `Testnet` with `Default::default() = Mainnet` | Network type |
+| `taproot` module | `calculate_tap_tweak(pubkey, merkle_root) -> [u8; 32]` | BIP-340 tagged hash for TapTweak computation |
+| `LotusAddress` | `from_taproot_commitment()`, `from_script()`, `commitment()` | P2TR address support with type byte 2 |
 | `MerkleMode` enum | `Bitcoin`, `Lotus` | Merkle tree odd-leaf handling |
 | `Sha256d` | 32-byte type implementing `Hashed`, `BitcoinCode`, serde | Double SHA-256 hash |
-| `Script` | Bytecode + `ScriptVariant` enum | Bitcoin script parsing and classification |
+| `Script` | Bytecode + `ScriptVariant` enum | Bitcoin script parsing and classification. `ScriptVariant::P2TR(PubKey, Option<[u8;32]>)` for Taproot scripts. |
 | `Tx` / `UnhashedTx` | Wire-format transaction with hash caching | Transaction representation |
