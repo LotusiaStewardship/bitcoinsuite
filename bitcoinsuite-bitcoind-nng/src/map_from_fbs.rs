@@ -5,7 +5,7 @@ use crate::{
     field::OptionExt,
     nng_interface_generated::nng_interface::{
         Block, BlockConnected, BlockDisconnected, BlockHash, BlockHeader, BlockMetadata, BlockTx,
-        ChainStateFlushed, Coin, MempoolTx, MiningWorkChanged, MiningWorkChangeReason,
+        ChainStateFlushed, Coin, MempoolTx, MiningWorkChangeReason, MiningWorkChanged,
         TransactionAddedToMempool, TransactionRemovedFromMempool, Tx, TxId, UpdatedBlockTip,
     },
     structs,

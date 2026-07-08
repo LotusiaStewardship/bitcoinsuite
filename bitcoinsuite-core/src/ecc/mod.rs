@@ -74,6 +74,10 @@ pub trait Ecc {
         recover_id: i32,
         msg: ByteArray<32>,
     ) -> Result<PubKey, EccError>;
+
+    fn tweak_pubkey(&self, pubkey: &PubKey, tweak: &[u8; 32]) -> Result<PubKey, EccError>;
+
+    fn tweak_seckey(&self, seckey: &SecKey, tweak: &[u8; 32]) -> Result<SecKey, EccError>;
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -137,5 +141,13 @@ impl Ecc for DummyEcc {
         _msg: ByteArray<32>,
     ) -> Result<PubKey, EccError> {
         unimplemented!()
+    }
+
+    fn tweak_pubkey(&self, _pubkey: &PubKey, _tweak: &[u8; 32]) -> Result<PubKey, EccError> {
+        Ok(PubKey::new_unchecked([0; PUBKEY_LENGTH]))
+    }
+
+    fn tweak_seckey(&self, _seckey: &SecKey, _tweak: &[u8; 32]) -> Result<SecKey, EccError> {
+        Ok(SecKey::new_unchecked([0; 32]))
     }
 }

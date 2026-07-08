@@ -1,4 +1,6 @@
-use bitcoinsuite_core::{lotus_txid, Bytes, BytesMut, Hashed, LotusHeader, Sha256d, Tx, BitcoinCode};
+use bitcoinsuite_core::{
+    lotus_txid, BitcoinCode, Bytes, BytesMut, Hashed, LotusHeader, Sha256d, Tx,
+};
 use primitive_types::U256;
 use thiserror::Error;
 
@@ -70,13 +72,12 @@ pub fn build_stratum_header(
     let coinbase_hex = format!("{}{}{}{}", coinbase1, extranonce1, extranonce2, coinbase2);
     let coinbase_bytes = hex::decode(coinbase_hex)?;
     let mut coinbase_buf = Bytes::from_slice(&coinbase_bytes);
-    let coinbase_tx = Tx::deser(&mut coinbase_buf)
-        .map_err(|_| StratumError::SerializationError)?;
+    let coinbase_tx = Tx::deser(&mut coinbase_buf).map_err(|_| StratumError::SerializationError)?;
 
     // Compute Lotus merkle leaf and root
     let leaf = lotus_merkle_leaf(&coinbase_tx);
     let mut merkle = leaf.as_ref().to_vec();
-    
+
     for branch_hex in merkle_branches {
         let mut branch = hex::decode(branch_hex)?;
         // Branches are stored as big-endian hex (via GetHex() in lotusd), but hashing
@@ -85,7 +86,9 @@ pub fn build_stratum_header(
         let mut concat = Vec::with_capacity(64);
         concat.extend_from_slice(&merkle);
         concat.extend_from_slice(&branch);
-        merkle = Sha256d::digest(Bytes::from_slice(&concat)).as_ref().to_vec();
+        merkle = Sha256d::digest(Bytes::from_slice(&concat))
+            .as_ref()
+            .to_vec();
     }
 
     // Create new header from scratch
@@ -109,12 +112,12 @@ pub fn build_stratum_header(
         .as_slice()
         .try_into()
         .map_err(|_| StratumError::InvalidInput("invalid nbits length".into()))?;
-    
+
     let ntime_bytes: [u8; 6] = hex::decode(ntime_hex_6b)?
         .as_slice()
         .try_into()
         .map_err(|_| StratumError::InvalidInput("invalid ntime length".into()))?;
-    
+
     let nonce_bytes: [u8; 8] = hex::decode(nonce_hex_8b)?
         .as_slice()
         .try_into()
@@ -126,23 +129,27 @@ pub fn build_stratum_header(
     header.bits = u32::from_le_bytes(nbits_bytes);
     header.timestamp = i64::from_le_bytes(ntime_le8);
     header.nonce = u64::from_le_bytes(nonce_bytes);
-    header.merkle_root = Sha256d::new(merkle.as_slice().try_into().map_err(|_| {
-        StratumError::InvalidInput("invalid merkle length".into())
-    })?);
+    header.merkle_root = Sha256d::new(
+        merkle
+            .as_slice()
+            .try_into()
+            .map_err(|_| StratumError::InvalidInput("invalid merkle length".into()))?,
+    );
 
     // Set Lotus-specific header fields from optional parameters
     header.height = height.unwrap_or(0);
-    
+
     if let Some(epoch_hash_hex) = epoch_hash_hex {
         header.epoch_hash = Sha256d::from_hex_be(epoch_hash_hex)
             .map_err(|e| StratumError::InvalidInput(format!("invalid epoch_hash: {}", e)))?;
     }
-    
+
     if let Some(ext_meta_hash_hex) = extended_metadata_hash_hex {
-        header.extended_metadata_hash = Sha256d::from_hex_be(ext_meta_hash_hex)
-            .map_err(|e| StratumError::InvalidInput(format!("invalid extended_metadata_hash: {}", e)))?;
+        header.extended_metadata_hash = Sha256d::from_hex_be(ext_meta_hash_hex).map_err(|e| {
+            StratumError::InvalidInput(format!("invalid extended_metadata_hash: {}", e))
+        })?;
     }
-    
+
     header.size = size.unwrap_or(0);
 
     Ok(header.ser().as_ref().to_vec())
@@ -169,9 +176,9 @@ pub fn difficulty_to_target(difficulty: f64) -> Result<[u8; 32]> {
     if difficulty <= 0.0 || !difficulty.is_finite() {
         return Err(StratumError::InvalidInput("invalid difficulty".into()));
     }
-    
+
     let diff1 = U256::from_big_endian(&hex::decode(DIFF1_TARGET_HEX)?);
-    
+
     // For fractional difficulties, we need to handle the division carefully
     // Use: target = diff1 / difficulty
     // Scale both diff1 and difficulty to preserve precision for all values.
@@ -201,16 +208,16 @@ pub fn target_to_difficulty(target_be: &[u8; 32]) -> Result<f64> {
     if target.is_zero() {
         return Err(StratumError::InvalidInput("zero target".into()));
     }
-    
+
     let diff1 = U256::from_big_endian(&hex::decode(DIFF1_TARGET_HEX)?);
-    
+
     // difficulty = diff1 / target
     // Scale up diff1 to preserve fractional precision for all target values.
     // Using u128 for the scaled result allows precise representation up to ~1e38.
     let scale = 1_000_000_000u64;
     let diff1_scaled = diff1 * U256::from(scale);
     let difficulty_scaled = diff1_scaled / target;
-    
+
     // Convert scaled difficulty back to f64
     // Use low_u64() instead of as_u64() throughout: as_u64() panics on overflow
     // (debug-mode overflow check), while low_u64() always returns the low 64 bits.
@@ -234,7 +241,7 @@ pub fn target_to_difficulty(target_be: &[u8; 32]) -> Result<f64> {
 pub fn validate_vardiff_floor(vardiff_min_floor: f64) -> Result<()> {
     if vardiff_min_floor <= 0.0 || !vardiff_min_floor.is_finite() {
         return Err(StratumError::InvalidInput(
-            "vardiff_min_floor must be positive".into()
+            "vardiff_min_floor must be positive".into(),
         ));
     }
     Ok(())
@@ -248,11 +255,8 @@ pub fn validate_vardiff_floor(vardiff_min_floor: f64) -> Result<()> {
     since = "0.2.0",
     note = "Use validate_vardiff_floor() instead. min_difficulty/max_difficulty are no longer used."
 )]
-pub fn validate_difficulty_config(
-    _min_difficulty: f64,
-    _max_difficulty: f64,
-) -> Result<()> {
-    Ok(())  // No-op for backward compatibility
+pub fn validate_difficulty_config(_min_difficulty: f64, _max_difficulty: f64) -> Result<()> {
+    Ok(()) // No-op for backward compatibility
 }
 
 /// Calculate pool difficulty from network difficulty.
@@ -269,7 +273,7 @@ pub fn calculate_pool_difficulty(
     _min_difficulty: f64,
     _max_difficulty: f64,
 ) -> f64 {
-    network_diff  // Return network diff directly for backward compatibility
+    network_diff // Return network diff directly for backward compatibility
 }
 
 /// Validate that a header hash meets a given difficulty target.
@@ -294,7 +298,7 @@ mod tests {
         assert!(validate_vardiff_floor(0.001).is_ok());
         assert!(validate_vardiff_floor(1.0).is_ok());
         assert!(validate_vardiff_floor(0.5).is_ok());
-        
+
         // Invalid floors
         assert!(validate_vardiff_floor(0.0).is_err());
         assert!(validate_vardiff_floor(-1.0).is_err());
@@ -308,20 +312,27 @@ mod tests {
         let network_target_hex = "000000000389f600000000000000000000000000000000000000000000000000";
         let network_target_bytes = hex::decode(network_target_hex).unwrap();
         let network_target: [u8; 32] = network_target_bytes.as_slice().try_into().unwrap();
-        
+
         // Convert network target to difficulty
         let network_diff = target_to_difficulty(&network_target).unwrap();
-        
+
         // Calculate pool difficulty with min=0.1, max=1.0
         #[allow(deprecated)]
         let pool_diff = calculate_pool_difficulty(network_diff, 0.0, 0.1, 1.0);
-        
+
         // Deprecated function now returns network_diff directly
         println!("Network target: {}", network_target_hex);
         println!("Network difficulty: {}", network_diff);
-        println!("Pool difficulty (deprecated, returns network_diff): {}", pool_diff);
-        
+        println!(
+            "Pool difficulty (deprecated, returns network_diff): {}",
+            pool_diff
+        );
+
         // Verify pool difficulty equals network_diff (deprecated behavior)
-        assert!((pool_diff - network_diff).abs() < 0.0001, "Pool difficulty should equal network_diff in deprecated mode, got {}", pool_diff);
+        assert!(
+            (pool_diff - network_diff).abs() < 0.0001,
+            "Pool difficulty should equal network_diff in deprecated mode, got {}",
+            pool_diff
+        );
     }
 }
