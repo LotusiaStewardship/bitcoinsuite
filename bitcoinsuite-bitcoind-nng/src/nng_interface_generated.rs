@@ -11,10 +11,10 @@ pub mod nng_interface {
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
 pub const ENUM_MIN_RPC_REQUEST: u8 = 0;
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
-pub const ENUM_MAX_RPC_REQUEST: u8 = 7;
+pub const ENUM_MAX_RPC_REQUEST: u8 = 6;
 #[deprecated(since = "2.0.0", note = "Use associated constants instead. This will no longer be generated in 2021.")]
 #[allow(non_camel_case_types)]
-pub const ENUM_VALUES_RPC_REQUEST: [RpcRequest; 8] = [
+pub const ENUM_VALUES_RPC_REQUEST: [RpcRequest; 7] = [
   RpcRequest::NONE,
   RpcRequest::GetBlockRequest,
   RpcRequest::GetBlockRangeRequest,
@@ -22,7 +22,6 @@ pub const ENUM_VALUES_RPC_REQUEST: [RpcRequest; 8] = [
   RpcRequest::GetUndoSliceRequest,
   RpcRequest::GetMempoolRequest,
   RpcRequest::GetMiningTemplateRequest,
-  RpcRequest::GetMiningStatusRequest,
 ];
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Default)]
@@ -37,10 +36,9 @@ impl RpcRequest {
   pub const GetUndoSliceRequest: Self = Self(4);
   pub const GetMempoolRequest: Self = Self(5);
   pub const GetMiningTemplateRequest: Self = Self(6);
-  pub const GetMiningStatusRequest: Self = Self(7);
 
   pub const ENUM_MIN: u8 = 0;
-  pub const ENUM_MAX: u8 = 7;
+  pub const ENUM_MAX: u8 = 6;
   pub const ENUM_VALUES: &'static [Self] = &[
     Self::NONE,
     Self::GetBlockRequest,
@@ -49,7 +47,6 @@ impl RpcRequest {
     Self::GetUndoSliceRequest,
     Self::GetMempoolRequest,
     Self::GetMiningTemplateRequest,
-    Self::GetMiningStatusRequest,
   ];
   /// Returns the variant's name or "" if unknown.
   pub fn variant_name(self) -> Option<&'static str> {
@@ -61,7 +58,6 @@ impl RpcRequest {
       Self::GetUndoSliceRequest => Some("GetUndoSliceRequest"),
       Self::GetMempoolRequest => Some("GetMempoolRequest"),
       Self::GetMiningTemplateRequest => Some("GetMiningTemplateRequest"),
-      Self::GetMiningStatusRequest => Some("GetMiningStatusRequest"),
       _ => None,
     }
   }
@@ -667,21 +663,6 @@ impl<'a> RpcCall<'a> {
     }
   }
 
-  #[inline]
-  #[allow(non_snake_case)]
-  pub fn rpc_as_get_mining_status_request(&self) -> Option<GetMiningStatusRequest<'a>> {
-    if self.rpc_type() == RpcRequest::GetMiningStatusRequest {
-      self.rpc().map(|t| {
-       // Safety:
-       // Created from a valid Table for this object
-       // Which contains a valid union in this slot
-       unsafe { GetMiningStatusRequest::init_from_table(t) }
-     })
-    } else {
-      None
-    }
-  }
-
 }
 
 impl ::flatbuffers::Verifiable for RpcCall<'_> {
@@ -698,7 +679,6 @@ impl ::flatbuffers::Verifiable for RpcCall<'_> {
           RpcRequest::GetUndoSliceRequest => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<GetUndoSliceRequest>>("RpcRequest::GetUndoSliceRequest", pos),
           RpcRequest::GetMempoolRequest => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<GetMempoolRequest>>("RpcRequest::GetMempoolRequest", pos),
           RpcRequest::GetMiningTemplateRequest => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<GetMiningTemplateRequest>>("RpcRequest::GetMiningTemplateRequest", pos),
-          RpcRequest::GetMiningStatusRequest => v.verify_union_variant::<::flatbuffers::ForwardsUOffset<GetMiningStatusRequest>>("RpcRequest::GetMiningStatusRequest", pos),
           _ => Ok(()),
         }
      })?
@@ -790,13 +770,6 @@ impl ::core::fmt::Debug for RpcCall<'_> {
         },
         RpcRequest::GetMiningTemplateRequest => {
           if let Some(x) = self.rpc_as_get_mining_template_request() {
-            ds.field("rpc", &x)
-          } else {
-            ds.field("rpc", &"InvalidFlatbuffer: Union discriminant does not match value.")
-          }
-        },
-        RpcRequest::GetMiningStatusRequest => {
-          if let Some(x) = self.rpc_as_get_mining_status_request() {
             ds.field("rpc", &x)
           } else {
             ds.field("rpc", &"InvalidFlatbuffer: Union discriminant does not match value.")
@@ -4774,297 +4747,5 @@ impl ::core::fmt::Debug for GetMiningTemplateResponse<'_> {
       ds.finish()
   }
 }
-pub enum GetMiningStatusRequestOffset {}
-#[derive(Copy, Clone, PartialEq)]
-
-pub struct GetMiningStatusRequest<'a> {
-  pub _tab: ::flatbuffers::Table<'a>,
-}
-
-impl<'a> ::flatbuffers::Follow<'a> for GetMiningStatusRequest<'a> {
-  type Inner = GetMiningStatusRequest<'a>;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
-  }
-}
-
-impl<'a> GetMiningStatusRequest<'a> {
-
-  #[inline]
-  pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-    GetMiningStatusRequest { _tab: table }
-  }
-  #[allow(unused_mut)]
-  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
-    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-    _args: &'args GetMiningStatusRequestArgs
-  ) -> ::flatbuffers::WIPOffset<GetMiningStatusRequest<'bldr>> {
-    let mut builder = GetMiningStatusRequestBuilder::new(_fbb);
-    builder.finish()
-  }
-
-}
-
-impl ::flatbuffers::Verifiable for GetMiningStatusRequest<'_> {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    v.visit_table(pos)?
-     .finish();
-    Ok(())
-  }
-}
-pub struct GetMiningStatusRequestArgs {
-}
-impl<'a> Default for GetMiningStatusRequestArgs {
-  #[inline]
-  fn default() -> Self {
-    GetMiningStatusRequestArgs {
-    }
-  }
-}
-
-pub struct GetMiningStatusRequestBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-  fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-  start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
-}
-impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> GetMiningStatusRequestBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> GetMiningStatusRequestBuilder<'a, 'b, A> {
-    let start = _fbb.start_table();
-    GetMiningStatusRequestBuilder {
-      fbb_: _fbb,
-      start_: start,
-    }
-  }
-  #[inline]
-  pub fn finish(self) -> ::flatbuffers::WIPOffset<GetMiningStatusRequest<'a>> {
-    let o = self.fbb_.end_table(self.start_);
-    ::flatbuffers::WIPOffset::new(o.value())
-  }
-}
-
-impl ::core::fmt::Debug for GetMiningStatusRequest<'_> {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-    let mut ds = f.debug_struct("GetMiningStatusRequest");
-      ds.finish()
-  }
-}
-pub enum GetMiningStatusResponseOffset {}
-#[derive(Copy, Clone, PartialEq)]
-
-pub struct GetMiningStatusResponse<'a> {
-  pub _tab: ::flatbuffers::Table<'a>,
-}
-
-impl<'a> ::flatbuffers::Follow<'a> for GetMiningStatusResponse<'a> {
-  type Inner = GetMiningStatusResponse<'a>;
-  #[inline]
-  unsafe fn follow(buf: &'a [u8], loc: usize) -> Self::Inner {
-    Self { _tab: unsafe { ::flatbuffers::Table::new(buf, loc) } }
-  }
-}
-
-impl<'a> GetMiningStatusResponse<'a> {
-  pub const VT_TIP_HASH: ::flatbuffers::VOffsetT = 4;
-  pub const VT_TIP_HEIGHT: ::flatbuffers::VOffsetT = 6;
-  pub const VT_INITIAL_BLOCK_DOWNLOAD: ::flatbuffers::VOffsetT = 8;
-  pub const VT_MEMPOOL_TX_COUNT: ::flatbuffers::VOffsetT = 10;
-  pub const VT_CONNECTED_PEERS: ::flatbuffers::VOffsetT = 12;
-  pub const VT_NODE_TIME: ::flatbuffers::VOffsetT = 14;
-  pub const VT_TIP_CHAIN_WORK: ::flatbuffers::VOffsetT = 16;
-  pub const VT_NETWORK: ::flatbuffers::VOffsetT = 18;
-
-  #[inline]
-  pub unsafe fn init_from_table(table: ::flatbuffers::Table<'a>) -> Self {
-    GetMiningStatusResponse { _tab: table }
-  }
-  #[allow(unused_mut)]
-  pub fn create<'bldr: 'args, 'args: 'mut_bldr, 'mut_bldr, A: ::flatbuffers::Allocator + 'bldr>(
-    _fbb: &'mut_bldr mut ::flatbuffers::FlatBufferBuilder<'bldr, A>,
-    args: &'args GetMiningStatusResponseArgs<'args>
-  ) -> ::flatbuffers::WIPOffset<GetMiningStatusResponse<'bldr>> {
-    let mut builder = GetMiningStatusResponseBuilder::new(_fbb);
-    builder.add_node_time(args.node_time);
-    builder.add_mempool_tx_count(args.mempool_tx_count);
-    if let Some(x) = args.network { builder.add_network(x); }
-    if let Some(x) = args.tip_chain_work { builder.add_tip_chain_work(x); }
-    builder.add_connected_peers(args.connected_peers);
-    builder.add_tip_height(args.tip_height);
-    if let Some(x) = args.tip_hash { builder.add_tip_hash(x); }
-    builder.add_initial_block_download(args.initial_block_download);
-    builder.finish()
-  }
-
-
-  #[inline]
-  pub fn tip_hash(&self) -> Option<BlockHash<'a>> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<BlockHash>>(GetMiningStatusResponse::VT_TIP_HASH, None)}
-  }
-  #[inline]
-  pub fn tip_height(&self) -> i32 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<i32>(GetMiningStatusResponse::VT_TIP_HEIGHT, Some(0)).unwrap()}
-  }
-  #[inline]
-  pub fn initial_block_download(&self) -> bool {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<bool>(GetMiningStatusResponse::VT_INITIAL_BLOCK_DOWNLOAD, Some(false)).unwrap()}
-  }
-  #[inline]
-  pub fn mempool_tx_count(&self) -> u64 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u64>(GetMiningStatusResponse::VT_MEMPOOL_TX_COUNT, Some(0)).unwrap()}
-  }
-  #[inline]
-  pub fn connected_peers(&self) -> u32 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u32>(GetMiningStatusResponse::VT_CONNECTED_PEERS, Some(0)).unwrap()}
-  }
-  #[inline]
-  pub fn node_time(&self) -> i64 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<i64>(GetMiningStatusResponse::VT_NODE_TIME, Some(0)).unwrap()}
-  }
-  #[inline]
-  pub fn tip_chain_work(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(GetMiningStatusResponse::VT_TIP_CHAIN_WORK, None)}
-  }
-  #[inline]
-  pub fn network(&self) -> Option<&'a str> {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<::flatbuffers::ForwardsUOffset<&str>>(GetMiningStatusResponse::VT_NETWORK, None)}
-  }
-}
-
-impl ::flatbuffers::Verifiable for GetMiningStatusResponse<'_> {
-  #[inline]
-  fn run_verifier(
-    v: &mut ::flatbuffers::Verifier, pos: usize
-  ) -> Result<(), ::flatbuffers::InvalidFlatbuffer> {
-    v.visit_table(pos)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<BlockHash>>("tip_hash", Self::VT_TIP_HASH, false)?
-     .visit_field::<i32>("tip_height", Self::VT_TIP_HEIGHT, false)?
-     .visit_field::<bool>("initial_block_download", Self::VT_INITIAL_BLOCK_DOWNLOAD, false)?
-     .visit_field::<u64>("mempool_tx_count", Self::VT_MEMPOOL_TX_COUNT, false)?
-     .visit_field::<u32>("connected_peers", Self::VT_CONNECTED_PEERS, false)?
-     .visit_field::<i64>("node_time", Self::VT_NODE_TIME, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("tip_chain_work", Self::VT_TIP_CHAIN_WORK, false)?
-     .visit_field::<::flatbuffers::ForwardsUOffset<&str>>("network", Self::VT_NETWORK, false)?
-     .finish();
-    Ok(())
-  }
-}
-pub struct GetMiningStatusResponseArgs<'a> {
-    pub tip_hash: Option<::flatbuffers::WIPOffset<BlockHash<'a>>>,
-    pub tip_height: i32,
-    pub initial_block_download: bool,
-    pub mempool_tx_count: u64,
-    pub connected_peers: u32,
-    pub node_time: i64,
-    pub tip_chain_work: Option<::flatbuffers::WIPOffset<&'a str>>,
-    pub network: Option<::flatbuffers::WIPOffset<&'a str>>,
-}
-impl<'a> Default for GetMiningStatusResponseArgs<'a> {
-  #[inline]
-  fn default() -> Self {
-    GetMiningStatusResponseArgs {
-      tip_hash: None,
-      tip_height: 0,
-      initial_block_download: false,
-      mempool_tx_count: 0,
-      connected_peers: 0,
-      node_time: 0,
-      tip_chain_work: None,
-      network: None,
-    }
-  }
-}
-
-pub struct GetMiningStatusResponseBuilder<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> {
-  fbb_: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>,
-  start_: ::flatbuffers::WIPOffset<::flatbuffers::TableUnfinishedWIPOffset>,
-}
-impl<'a: 'b, 'b, A: ::flatbuffers::Allocator + 'a> GetMiningStatusResponseBuilder<'a, 'b, A> {
-  #[inline]
-  pub fn add_tip_hash(&mut self, tip_hash: ::flatbuffers::WIPOffset<BlockHash<'b >>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<BlockHash>>(GetMiningStatusResponse::VT_TIP_HASH, tip_hash);
-  }
-  #[inline]
-  pub fn add_tip_height(&mut self, tip_height: i32) {
-    self.fbb_.push_slot::<i32>(GetMiningStatusResponse::VT_TIP_HEIGHT, tip_height, 0);
-  }
-  #[inline]
-  pub fn add_initial_block_download(&mut self, initial_block_download: bool) {
-    self.fbb_.push_slot::<bool>(GetMiningStatusResponse::VT_INITIAL_BLOCK_DOWNLOAD, initial_block_download, false);
-  }
-  #[inline]
-  pub fn add_mempool_tx_count(&mut self, mempool_tx_count: u64) {
-    self.fbb_.push_slot::<u64>(GetMiningStatusResponse::VT_MEMPOOL_TX_COUNT, mempool_tx_count, 0);
-  }
-  #[inline]
-  pub fn add_connected_peers(&mut self, connected_peers: u32) {
-    self.fbb_.push_slot::<u32>(GetMiningStatusResponse::VT_CONNECTED_PEERS, connected_peers, 0);
-  }
-  #[inline]
-  pub fn add_node_time(&mut self, node_time: i64) {
-    self.fbb_.push_slot::<i64>(GetMiningStatusResponse::VT_NODE_TIME, node_time, 0);
-  }
-  #[inline]
-  pub fn add_tip_chain_work(&mut self, tip_chain_work: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(GetMiningStatusResponse::VT_TIP_CHAIN_WORK, tip_chain_work);
-  }
-  #[inline]
-  pub fn add_network(&mut self, network: ::flatbuffers::WIPOffset<&'b  str>) {
-    self.fbb_.push_slot_always::<::flatbuffers::WIPOffset<_>>(GetMiningStatusResponse::VT_NETWORK, network);
-  }
-  #[inline]
-  pub fn new(_fbb: &'b mut ::flatbuffers::FlatBufferBuilder<'a, A>) -> GetMiningStatusResponseBuilder<'a, 'b, A> {
-    let start = _fbb.start_table();
-    GetMiningStatusResponseBuilder {
-      fbb_: _fbb,
-      start_: start,
-    }
-  }
-  #[inline]
-  pub fn finish(self) -> ::flatbuffers::WIPOffset<GetMiningStatusResponse<'a>> {
-    let o = self.fbb_.end_table(self.start_);
-    ::flatbuffers::WIPOffset::new(o.value())
-  }
-}
-
-impl ::core::fmt::Debug for GetMiningStatusResponse<'_> {
-  fn fmt(&self, f: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
-    let mut ds = f.debug_struct("GetMiningStatusResponse");
-      ds.field("tip_hash", &self.tip_hash());
-      ds.field("tip_height", &self.tip_height());
-      ds.field("initial_block_download", &self.initial_block_download());
-      ds.field("mempool_tx_count", &self.mempool_tx_count());
-      ds.field("connected_peers", &self.connected_peers());
-      ds.field("node_time", &self.node_time());
-      ds.field("tip_chain_work", &self.tip_chain_work());
-      ds.field("network", &self.network());
-      ds.finish()
-  }
-}
 }  // pub mod NngInterface
+
