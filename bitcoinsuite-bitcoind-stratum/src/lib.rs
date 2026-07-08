@@ -92,17 +92,13 @@ pub fn build_stratum_header(
     let mut header = LotusHeader::default();
 
     // Set header fields
-    // Convert prevhash from stratum word-reversed format to native byte order
-    let prevhash_stratum_bytes: [u8; 32] = hex::decode(prevhash_hex)?
+    // Decode LE-hex prevhash bytes directly into native byte order.
+    // Lotus uses little-endian uint256 internally, so the raw hex bytes are
+    // already in the correct order for Sha256d.
+    let prevhash_bytes: [u8; 32] = hex::decode(prevhash_hex)?
         .as_slice()
         .try_into()
         .map_err(|_| StratumError::InvalidInput("invalid prevhash length".into()))?;
-    // Stratum format reverses each 32-bit word; reverse back to native order
-    let mut prevhash_bytes = [0u8; 32];
-    for i in 0..8 {
-        let word: [u8; 4] = prevhash_stratum_bytes[i * 4..(i + 1) * 4].try_into().unwrap();
-        prevhash_bytes[i * 4..(i + 1) * 4].copy_from_slice(&word.iter().rev().copied().collect::<Vec<_>>());
-    }
     header.prev_block = Sha256d::new(prevhash_bytes);
 
     let version_byte = u8::from_str_radix(version_hex, 16)
