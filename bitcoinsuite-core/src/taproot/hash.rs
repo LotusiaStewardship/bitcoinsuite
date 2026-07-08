@@ -61,7 +61,11 @@ pub fn tap_leaf_hash(script: &[u8], leaf_version: u8) -> [u8; 32] {
 /// `tapbranch_hash = SHA256_tag("TapBranch", left || right)`
 /// where left and right are ordered lexicographically.
 pub fn tap_branch_hash(left: &[u8; 32], right: &[u8; 32]) -> [u8; 32] {
-    let (first, second) = if left < right { (left, right) } else { (right, left) };
+    let (first, second) = if left < right {
+        (left, right)
+    } else {
+        (right, left)
+    };
     let mut data = [0u8; 64];
     data[..32].copy_from_slice(first);
     data[32..].copy_from_slice(second);

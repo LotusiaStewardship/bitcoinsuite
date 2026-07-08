@@ -1,8 +1,8 @@
 use std::{fmt::Display, str::FromStr};
 use thiserror::Error;
 
-use crate::{BytesMut, Hashed, Net, Script, Sha256, ShaRmd160};
 use crate::ecc::{PubKey, PUBKEY_LENGTH};
+use crate::{BytesMut, Hashed, Net, Script, Sha256, ShaRmd160};
 
 pub const LOTUS_ADDRESS_CHECKSUM_LEN: usize = 4;
 pub const LOTUS_PREFIX: &str = "lotus";
@@ -58,9 +58,15 @@ pub enum LotusAddressError {
 use self::LotusAddressError::*;
 
 impl LotusAddress {
-    pub fn prefix(&self) -> &str { &self.prefix }
-    pub fn net(&self) -> Net { self.net }
-    pub fn as_str(&self) -> &str { &self.lotus_addr }
+    pub fn prefix(&self) -> &str {
+        &self.prefix
+    }
+    pub fn net(&self) -> Net {
+        self.net
+    }
+    pub fn as_str(&self) -> &str {
+        &self.lotus_addr
+    }
 
     pub fn script(&self) -> Script {
         match &self.payload {
@@ -70,11 +76,17 @@ impl LotusAddress {
     }
 
     pub fn hash(&self) -> Option<&ShaRmd160> {
-        match &self.payload { LotusAddressPayload::Hash(h) => Some(h), _ => None }
+        match &self.payload {
+            LotusAddressPayload::Hash(h) => Some(h),
+            _ => None,
+        }
     }
 
     pub fn taproot_pubkey(&self) -> Option<&PubKey> {
-        match &self.payload { LotusAddressPayload::Taproot(pk) => Some(pk), _ => None }
+        match &self.payload {
+            LotusAddressPayload::Taproot(pk) => Some(pk),
+            _ => None,
+        }
     }
 
     /// Create from HASH160 (type byte 0, xpi-ts format for P2PKH/P2SH).
@@ -84,7 +96,12 @@ impl LotusAddress {
 
     /// Create from Taproot commitment pubkey (type byte 2, xpi-ts format).
     pub fn from_taproot(prefix: &str, net: Net, pubkey: &PubKey) -> Self {
-        encode(prefix, net, LotusAddressType::TaprootCommitment, pubkey.as_slice())
+        encode(
+            prefix,
+            net,
+            LotusAddressType::TaprootCommitment,
+            pubkey.as_slice(),
+        )
     }
 
     /// Create from a Script, extracting the appropriate payload based on variant.
@@ -98,9 +115,18 @@ impl LotusAddress {
     }
 }
 
-fn encode(prefix: &str, net: Net, addr_type: LotusAddressType, payload_bytes: &[u8]) -> LotusAddress {
+fn encode(
+    prefix: &str,
+    net: Net,
+    addr_type: LotusAddressType,
+    payload_bytes: &[u8],
+) -> LotusAddress {
     let mut lotus_addr = prefix.to_string();
-    let net_char = match net { Net::Mainnet => '_', Net::Regtest => 'R', Net::Testnet => 'T' };
+    let net_char = match net {
+        Net::Mainnet => '_',
+        Net::Regtest => 'R',
+        Net::Testnet => 'T',
+    };
     lotus_addr.push(net_char);
 
     let checksum = calc_checksum(prefix, net_char, addr_type, payload_bytes);
@@ -120,30 +146,45 @@ fn encode(prefix: &str, net: Net, addr_type: LotusAddressType, payload_bytes: &[
         }
     };
 
-    LotusAddress { prefix: prefix.to_string(), net, lotus_addr, payload }
+    LotusAddress {
+        prefix: prefix.to_string(),
+        net,
+        lotus_addr,
+        payload,
+    }
 }
 
 impl FromStr for LotusAddress {
     type Err = LotusAddressError;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let prefix = s.chars()
+        let prefix = s
+            .chars()
             .take_while(|&c| (c.is_ascii_alphabetic() && c.is_lowercase()) || c.is_ascii_digit())
             .collect::<String>();
-        if prefix.is_empty() { return Err(MissingPrefix); }
+        if prefix.is_empty() {
+            return Err(MissingPrefix);
+        }
 
         let net_char = s.chars().nth(prefix.len()).ok_or(MissingNetChar)?;
         let net = match net_char {
-            '_' => Net::Mainnet, 'R' => Net::Regtest, 'T' => Net::Testnet,
+            '_' => Net::Mainnet,
+            'R' => Net::Regtest,
+            'T' => Net::Testnet,
             _ => return Err(UnsupportedNet(net_char)),
         };
 
         let data_b58 = &s[prefix.len() + 1..];
         let data = bs58::decode(data_b58).into_vec().map_err(InvalidBase58)?;
         let payload_type_byte = *data.first().ok_or(MissingBase58)?;
-        let checksum_end = data.len().checked_sub(LOTUS_ADDRESS_CHECKSUM_LEN).ok_or(MissingChecksum)?;
+        let checksum_end = data
+            .len()
+            .checked_sub(LOTUS_ADDRESS_CHECKSUM_LEN)
+            .ok_or(MissingChecksum)?;
         let payload = data.get(1..checksum_end).ok_or(MissingChecksum)?;
-        if payload.is_empty() { return Err(MissingPayload); }
+        if payload.is_empty() {
+            return Err(MissingPayload);
+        }
 
         let expected_checksum = &data[data.len() - LOTUS_ADDRESS_CHECKSUM_LEN..];
 
@@ -163,21 +204,30 @@ impl FromStr for LotusAddress {
 
         // Validate payload length after checksum check (short inputs fail checksum first)
         match addr_type {
-            LotusAddressType::Hash if payload.len() != 20 =>
-                return Err(InvalidHashPayloadLength(payload.len())),
-            LotusAddressType::TaprootCommitment if payload.len() != PUBKEY_LENGTH =>
-                return Err(InvalidTaprootPayloadLength(payload.len())),
+            LotusAddressType::Hash if payload.len() != 20 => {
+                return Err(InvalidHashPayloadLength(payload.len()))
+            }
+            LotusAddressType::TaprootCommitment if payload.len() != PUBKEY_LENGTH => {
+                return Err(InvalidTaprootPayloadLength(payload.len()))
+            }
             _ => {}
         }
 
         let payload_enum = match addr_type {
-            LotusAddressType::Hash =>
-                LotusAddressPayload::Hash(ShaRmd160::new(payload.try_into().unwrap())),
-            LotusAddressType::TaprootCommitment =>
-                LotusAddressPayload::Taproot(PubKey::new_unchecked(payload.try_into().unwrap())),
+            LotusAddressType::Hash => {
+                LotusAddressPayload::Hash(ShaRmd160::new(payload.try_into().unwrap()))
+            }
+            LotusAddressType::TaprootCommitment => {
+                LotusAddressPayload::Taproot(PubKey::new_unchecked(payload.try_into().unwrap()))
+            }
         };
 
-        Ok(LotusAddress { prefix, net, lotus_addr: s.to_string(), payload: payload_enum })
+        Ok(LotusAddress {
+            prefix,
+            net,
+            lotus_addr: s.to_string(),
+            payload: payload_enum,
+        })
     }
 }
 
@@ -187,19 +237,26 @@ impl Display for LotusAddress {
     }
 }
 
-fn calc_checksum(prefix: &str, net_char: char, addr_type: LotusAddressType, payload: &[u8]) -> [u8; 4] {
+fn calc_checksum(
+    prefix: &str,
+    net_char: char,
+    addr_type: LotusAddressType,
+    payload: &[u8],
+) -> [u8; 4] {
     let mut preimage = BytesMut::new();
     preimage.put_slice(prefix.as_bytes());
     preimage.put_slice(&[net_char as u8, addr_type as u8]);
     preimage.put_slice(payload);
     let hash = Sha256::digest(preimage.freeze());
-    hash.as_slice()[..LOTUS_ADDRESS_CHECKSUM_LEN].try_into().unwrap()
+    hash.as_slice()[..LOTUS_ADDRESS_CHECKSUM_LEN]
+        .try_into()
+        .unwrap()
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{Hashed, LotusAddress, LotusAddressError, Net, ShaRmd160, LOTUS_PREFIX};
     use crate::ecc::{PubKey, PUBKEY_LENGTH};
+    use crate::{Hashed, LotusAddress, LotusAddressError, Net, ShaRmd160, LOTUS_PREFIX};
 
     const MAINNET_P2PKH: &str = "lotus_1HWH7ZdGdFJfbGUZwdg3aCQL1xgQk67Mw5";
     const REGTEST_P2PKH: &str = "lotusR1HWH7ZdGdFJfbGUZwdg3aCQL1xgQgrAbks";
@@ -236,17 +293,48 @@ mod tests {
         assert_eq!(addr.hash(), Some(&p2sh_hash()));
 
         // Error cases
-        assert_eq!("A".parse::<LotusAddress>().unwrap_err(), LotusAddressError::MissingPrefix);
-        assert_eq!("lotus".parse::<LotusAddress>().unwrap_err(), LotusAddressError::MissingNetChar);
-        assert_eq!("lotusP".parse::<LotusAddress>().unwrap_err(), LotusAddressError::UnsupportedNet('P'));
-        assert_eq!("lotus_".parse::<LotusAddress>().unwrap_err(), LotusAddressError::MissingBase58);
-        assert_eq!("lotus_0".parse::<LotusAddress>().unwrap_err(),
-            LotusAddressError::InvalidBase58(bs58::decode::Error::InvalidCharacter { character: '0', index: 0 }));
-        assert_eq!("lotus_1".parse::<LotusAddress>().unwrap_err(), LotusAddressError::MissingChecksum);
-        assert_eq!("lotus_1111".parse::<LotusAddress>().unwrap_err(), LotusAddressError::MissingChecksum);
-        assert_eq!("lotus_11111".parse::<LotusAddress>().unwrap_err(), LotusAddressError::MissingPayload);
-        assert_eq!("lotus_111111".parse::<LotusAddress>().unwrap_err(),
-            LotusAddressError::InvalidChecksum { expected: "00000000".to_string(), actual: "66276ef9".to_string() });
+        assert_eq!(
+            "A".parse::<LotusAddress>().unwrap_err(),
+            LotusAddressError::MissingPrefix
+        );
+        assert_eq!(
+            "lotus".parse::<LotusAddress>().unwrap_err(),
+            LotusAddressError::MissingNetChar
+        );
+        assert_eq!(
+            "lotusP".parse::<LotusAddress>().unwrap_err(),
+            LotusAddressError::UnsupportedNet('P')
+        );
+        assert_eq!(
+            "lotus_".parse::<LotusAddress>().unwrap_err(),
+            LotusAddressError::MissingBase58
+        );
+        assert_eq!(
+            "lotus_0".parse::<LotusAddress>().unwrap_err(),
+            LotusAddressError::InvalidBase58(bs58::decode::Error::InvalidCharacter {
+                character: '0',
+                index: 0
+            })
+        );
+        assert_eq!(
+            "lotus_1".parse::<LotusAddress>().unwrap_err(),
+            LotusAddressError::MissingChecksum
+        );
+        assert_eq!(
+            "lotus_1111".parse::<LotusAddress>().unwrap_err(),
+            LotusAddressError::MissingChecksum
+        );
+        assert_eq!(
+            "lotus_11111".parse::<LotusAddress>().unwrap_err(),
+            LotusAddressError::MissingPayload
+        );
+        assert_eq!(
+            "lotus_111111".parse::<LotusAddress>().unwrap_err(),
+            LotusAddressError::InvalidChecksum {
+                expected: "00000000".to_string(),
+                actual: "66276ef9".to_string()
+            }
+        );
         Ok(())
     }
 
@@ -284,10 +372,16 @@ mod tests {
         let address = LotusAddress::from_taproot(LOTUS_PREFIX, Net::Mainnet, &pubkey);
         assert_eq!(address.prefix(), "lotus");
         assert_eq!(address.net(), Net::Mainnet);
-        assert_eq!(address.taproot_pubkey().unwrap().as_slice(), pubkey.as_slice());
+        assert_eq!(
+            address.taproot_pubkey().unwrap().as_slice(),
+            pubkey.as_slice()
+        );
 
         let parsed: LotusAddress = address.as_str().parse()?;
-        assert_eq!(parsed.taproot_pubkey().unwrap().as_slice(), pubkey.as_slice());
+        assert_eq!(
+            parsed.taproot_pubkey().unwrap().as_slice(),
+            pubkey.as_slice()
+        );
         assert_eq!(parsed.as_str(), address.as_str());
         Ok(())
     }

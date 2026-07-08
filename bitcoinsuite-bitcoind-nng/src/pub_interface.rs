@@ -3,7 +3,7 @@ use flatbuffers::VerifierOptions;
 use nng::{
     options::{
         protocol::pubsub::{Subscribe, Unsubscribe},
-        RecvBufferSize, Options,
+        Options, RecvBufferSize,
     },
     Protocol, Socket,
 };

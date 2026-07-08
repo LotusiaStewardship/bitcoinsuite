@@ -173,4 +173,3 @@ pub struct MiningTemplate {
     pub nbits_stratum: String,
     pub ntime_stratum: String,
 }
-

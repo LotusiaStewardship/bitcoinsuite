@@ -218,7 +218,7 @@ pub fn verify_taproot_commitment(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Script, ecc::PubKey, taproot::TAPROOT_LEAF_TAPSCRIPT};
+    use crate::{ecc::PubKey, taproot::TAPROOT_LEAF_TAPSCRIPT, Script};
 
     #[test]
     fn test_build_tap_tree_single_leaf() {
@@ -242,10 +242,7 @@ mod tests {
             script: Script::from_slice(&[0x52]),
             leaf_version: TAPROOT_LEAF_TAPSCRIPT,
         });
-        let branch = TapNode::Branch(Box::new(TapBranchNode {
-            left,
-            right,
-        }));
+        let branch = TapNode::Branch(Box::new(TapBranchNode { left, right }));
         let result = build_tap_tree(&branch);
         assert_eq!(result.leaves.len(), 2);
         // Each leaf should have one merkle path entry (the other sibling)
