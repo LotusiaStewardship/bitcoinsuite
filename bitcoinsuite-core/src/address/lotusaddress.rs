@@ -94,6 +94,13 @@ impl LotusAddress {
         encode(prefix, net, LotusAddressType::Hash, hash.as_slice())
     }
 
+    // ponytail: compatibility — stratum-server-nng tests pass full scripts.
+    // Deprecated: use from_script() for new code.
+    #[deprecated(note = "use from_script()")]
+    pub fn new(prefix: &str, net: Net, script: Script) -> Self {
+        Self::from_script(prefix, net, &script).expect("P2PKH/P2SH/P2TR scripts only")
+    }
+
     /// Create from Taproot commitment pubkey (type byte 2, xpi-ts format).
     pub fn from_taproot(prefix: &str, net: Net, pubkey: &PubKey) -> Self {
         encode(
