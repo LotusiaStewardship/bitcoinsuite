@@ -32,7 +32,7 @@
 
 ## Phases
 
-### Phase 1: Foundation — Tagged Hashes + Key Tweaking
+### Phase 1: Foundation — Tagged Hashes + Key Tweaking ✅ DONE
 
 **Crates**: `bitcoinsuite-core`, `bitcoinsuite-ecc-secp256k1`
 
@@ -62,7 +62,7 @@ Add the two primitive operations that all Taproot computation rests on:
 
 ---
 
-### Phase 2: Taproot Tree + Commitment
+### Phase 2: Taproot Tree + Commitment ✅ DONE
 
 **Crates**: `bitcoinsuite-core`
 
@@ -94,32 +94,27 @@ Build on Phase 1 to implement the Taproot Merkle tree and commitment computation
 
 ---
 
-### Phase 3: Address Encoding
+### Phase 3: Address Encoding — ✅ DONE (diverged from plan)
 
 **Crates**: `bitcoinsuite-core`
 
-Enable P2TR address representation in CashAddress format:
+P2TR address encoding uses **LotusAddress** (base58), not CashAddress:
 
-1. **`AddressType::P2TR` variant**
-   - Add `P2TR = 16` (or whatever the Lotus/coin-specific version byte is) to `AddressType` enum
-   - The version byte used in CashAddress payload encoding
+1. **`LotusAddress` rewrite** — xpi-ts compatible format:
+   - Type byte 0: 20-byte HASH160 (P2PKH/P2SH)
+   - Type byte 2: 33-byte Taproot commitment pubkey (P2TR)
+   - `from_hash()` — P2PKH/P2SH addresses
+   - `from_taproot()` — P2TR addresses from pubkey
+   - `from_script()` — auto-detect script variant
+   - `new()` retained as `#[deprecated]` compat shim for downstream repos
 
-2. **`CashAddress` P2TR support**
-   - `CashAddress::from_pubkey(prefix, pubkey: &PubKey)` — create P2TR address from commitment pubkey
-   - `CashAddress::to_script()` — handle `AddressType::P2TR` → `Script::p2tr(...)`
-   - `_from_cash_addr()` — handle P2TR version byte → `AddressType::P2TR`
-   - `_to_cash_addr()` — handle `AddressType::P2TR` version byte
+2. **`CashAddress`** — no P2TR support. CashAddress payload is 20-byte hash; P2TR needs 33-byte pubkey. LotusAddress already covers P2TR for Lotus chains.
 
-3. **`LotusAddress` P2TR support**
-   - LotusAddress already wraps a `Script`, so it should just work with P2TR scripts
-
-**Note**: The version byte for P2TR in CashAddress needs to match the Lotus specification. Check the lotusd reference or xpi-ts for the exact value.
-
-**Verification**: Address round-trip tests (encode → decode → encode).
+**Verification**: Round-trip encode/decode, real xpi-ts P2TR address `lotus_JEL17jy7Rn9cAhxDKZdVEG7ZEAgmuq1hALbDMecGcvBy5jmnTde` verified.
 
 ---
 
-### Phase 4: SIGHASH_LOTUS + Taproot Signing
+### Phase 4: SIGHASH_LOTUS + Taproot Signing ✅ DONE
 
 **Crates**: `bitcoinsuite-core`
 
@@ -147,7 +142,7 @@ Enable Taproot-aware transaction signing:
 
 ---
 
-### Phase 5: Spend Verification
+### Phase 5: Spend Verification — ⏸️ DEFERRED
 
 **Crates**: `bitcoinsuite-core`
 
@@ -165,7 +160,7 @@ Implement full Taproot spend verification (key-path and script-path):
 
 ---
 
-### Phase 6: Stratum Integration (if needed)
+### Phase 6: Stratum Integration — ⏸️ DEFERRED
 
 **Crates**: `bitcoinsuite-bitcoind-stratum`
 
