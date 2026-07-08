@@ -1,10 +1,12 @@
 mod error;
+mod p2tr_signatory;
 mod sign_data;
 mod signatory;
 mod tx_builder;
 mod unsigned_tx;
 
 pub use self::error::SignError;
+pub use self::p2tr_signatory::*;
 pub use self::sign_data::*;
 pub use self::signatory::*;
 pub use self::tx_builder::*;

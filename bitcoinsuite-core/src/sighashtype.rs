@@ -24,9 +24,17 @@ pub enum SigHashTypeOutputs {
 pub enum SigHashTypeVariant {
     Legacy,
     Bip143,
+    /// SIGHASH_LOTUS (0x60) — required for Taproot key-path spending in Lotus chains.
+    Lotus,
 }
 
 impl SigHashType {
+    /// Taproot key-path sighash type: SIGHASH_ALL | SIGHASH_LOTUS (0x61)
+    pub const ALL_LOTUS: SigHashType = SigHashType {
+        variant: SigHashTypeVariant::Lotus,
+        input_type: SigHashTypeInputs::Fixed,
+        output_type: SigHashTypeOutputs::All,
+    };
     pub const ALL_BIP143: SigHashType = SigHashType {
         variant: SigHashTypeVariant::Bip143,
         input_type: SigHashTypeInputs::Fixed,
@@ -69,6 +77,7 @@ impl SigHashType {
         let variant = match flags & 0x7c {
             0 => SigHashTypeVariant::Legacy,
             0x40 => SigHashTypeVariant::Bip143,
+            0x60 => SigHashTypeVariant::Lotus,
             _ => return None,
         };
         let input_type = match flags & 0x80 {
@@ -115,6 +124,7 @@ impl SigHashTypeVariant {
         match self {
             SigHashTypeVariant::Legacy => 0x00,
             SigHashTypeVariant::Bip143 => 0x40,
+            SigHashTypeVariant::Lotus => 0x60,
         }
     }
 }
@@ -128,6 +138,9 @@ impl Display for SigHashType {
         }
         if let SigHashTypeVariant::Bip143 = self.variant {
             write!(f, "|FORKID")?;
+        }
+        if let SigHashTypeVariant::Lotus = self.variant {
+            write!(f, "|LOTUS")?;
         }
         if let SigHashTypeInputs::AnyoneCanPay = self.input_type {
             write!(f, "|ANYONECANPAY")?;

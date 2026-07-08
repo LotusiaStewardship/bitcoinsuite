@@ -18,6 +18,7 @@ mod script;
 mod sequence;
 mod sighashtype;
 mod sign;
+pub mod taproot;
 mod tx;
 mod utxo;
 
