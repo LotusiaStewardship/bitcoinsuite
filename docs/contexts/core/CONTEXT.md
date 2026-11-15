@@ -75,4 +75,5 @@ src/
 | `MerkleMode` enum | `Bitcoin`, `Lotus` | Merkle tree odd-leaf handling |
 | `Sha256d` | 32-byte type implementing `Hashed`, `BitcoinCode`, serde | Double SHA-256 hash |
 | `Script` | Bytecode + `ScriptVariant` enum | Bitcoin script parsing and classification |
+| `LotusAddress` | `FromStr` / `from_hash()` / `from_script()` / `from_taproot()` | Lotus XAddress (base58). Type byte 0: the payload is the complete output script (25-byte P2PKH, 23-byte P2SH), as encoded by lotusd and xpi-ts; type byte 2: 33-byte Taproot commitment |
 | `Tx` / `UnhashedTx` | Wire-format transaction with hash caching | Transaction representation |

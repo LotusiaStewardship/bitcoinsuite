@@ -35,7 +35,7 @@ src/
 
 1. **Lotus-specific merkle leaf** — `lotus_merkle_leaf(tx)` computes `SHA256d(txid || lotus_txid)` instead of standard Bitcoin's `SHA256d(raw_tx)`.
 2. **No ErrorMeta derive** — Unlike most crates, `StratumError` uses plain `thiserror::Error` without `ErrorMeta`. (Design inconsistency noted.)
-3. **Difficulty uses U256** — Uses `primitive_types::U256` for target/difficulty conversion, not f64 (which caused overflow in earlier versions).
+3. **Difficulty uses U256** — Uses `primitive_types::U256` for target/difficulty conversion, not f64 (which caused overflow in earlier versions). `difficulty_to_target()` is exact for every positive finite difficulty (integer mantissa/exponent split, 512-bit division; targets above 2^256 - 1 saturate), so regtest-scale difficulties (~4.7e-10) work; `target_to_difficulty()` returns diff1 / target in f64 for every non-zero target.
 4. **Deprecated pool difficulty** — The `pool_difficulty` parameter is deprecated and always returns `network_difficulty` for backward compatibility.
 5. **Lotus header is 131 bytes** — Different from Bitcoin's 80-byte header. Key difference: merkle_root comes after epoch_hash.
 

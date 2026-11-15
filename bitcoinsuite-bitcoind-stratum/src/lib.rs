@@ -1,7 +1,7 @@
 use bitcoinsuite_core::{
     lotus_txid, BitcoinCode, Bytes, BytesMut, Hashed, LotusHeader, Sha256d, Tx,
 };
-use primitive_types::U256;
+use primitive_types::{U256, U512};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -163,7 +163,12 @@ const DIFF1_TARGET_HEX: &str = "00000000ffffffffffffffffffffffffffffffffffffffff
 /// Convert Stratum V1 difficulty to a 32-byte target (big-endian).
 ///
 /// This follows the standard Stratum V1 difficulty-to-target conversion:
-/// target = DIFF1_TARGET / difficulty
+/// target = floor(DIFF1_TARGET / difficulty)
+///
+/// The division is exact for every positive finite difficulty: the f64 is
+/// split into its integer mantissa and binary exponent and the quotient is
+/// computed on 512 bits. Targets above 2^256 - 1 (difficulty below about
+/// 2.3e-10) saturate at 2^256 - 1.
 ///
 /// # Arguments
 ///
@@ -177,21 +182,45 @@ pub fn difficulty_to_target(difficulty: f64) -> Result<[u8; 32]> {
         return Err(StratumError::InvalidInput("invalid difficulty".into()));
     }
 
-    let diff1 = U256::from_big_endian(&hex::decode(DIFF1_TARGET_HEX)?);
+    let diff1 = U512::from(U256::from_big_endian(&hex::decode(DIFF1_TARGET_HEX)?));
 
-    // For fractional difficulties, we need to handle the division carefully
-    // Use: target = diff1 / difficulty
-    // Scale both diff1 and difficulty to preserve precision for all values.
-    // Using u128 for difficulty allows precise representation up to ~1e38,
-    // which covers all realistic difficulty values.
-    let scale = 1e9;
-    let difficulty_scaled = (difficulty * scale).round() as u128;
-    if difficulty_scaled == 0 {
-        return Err(StratumError::InvalidInput("difficulty too small".into()));
-    }
-    // target = diff1 / difficulty = (diff1 * scale) / (difficulty * scale)
-    let diff1_scaled = diff1 * U256::from(scale as u128);
-    let target = diff1_scaled / U256::from(difficulty_scaled);
+    // difficulty = mantissa * 2^exponent, with an integer mantissa < 2^53.
+    let bits = difficulty.to_bits();
+    let biased_exponent = ((bits >> 52) & 0x7ff) as i32;
+    let fraction = bits & ((1u64 << 52) - 1);
+    let (mantissa, exponent) = if biased_exponent == 0 {
+        (fraction, -1074) // subnormal
+    } else {
+        (fraction | (1u64 << 52), biased_exponent - 1075)
+    };
+
+    // target = diff1 / difficulty = diff1 * 2^-exponent / mantissa
+    let target = if exponent >= 0 {
+        // diff1 < 2^224 and mantissa >= 1: any shift past 224 gives 0.
+        if exponent > 224 {
+            U512::zero()
+        } else {
+            diff1 / (U512::from(mantissa) << exponent as usize)
+        }
+    } else {
+        let shift = (-exponent) as usize;
+        // diff1 << shift must fit in 512 bits; beyond that the target
+        // saturates anyway (diff1 << 288 / 2^53 > 2^256).
+        if shift > 288 {
+            U512::MAX
+        } else {
+            (diff1 << shift) / U512::from(mantissa)
+        }
+    };
+
+    let max_target = U512::from(U256::MAX);
+    let target = if target > max_target {
+        U256::MAX
+    } else {
+        let mut wide = [0u8; 64];
+        target.to_big_endian(&mut wide);
+        U256::from_big_endian(&wide[32..])
+    };
     if target.is_zero() {
         return Err(StratumError::InvalidInput("difficulty too high".into()));
     }
@@ -202,7 +231,8 @@ pub fn difficulty_to_target(difficulty: f64) -> Result<[u8; 32]> {
 
 /// Convert a 32-byte target (big-endian) to difficulty.
 ///
-/// Uses the standard formula: difficulty = DIFF1_TARGET / target
+/// Uses the standard formula: difficulty = DIFF1_TARGET / target, computed
+/// in f64 (relative error below 1e-15 for every non-zero target).
 pub fn target_to_difficulty(target_be: &[u8; 32]) -> Result<f64> {
     let target = U256::from_big_endian(target_be);
     if target.is_zero() {
@@ -210,23 +240,14 @@ pub fn target_to_difficulty(target_be: &[u8; 32]) -> Result<f64> {
     }
 
     let diff1 = U256::from_big_endian(&hex::decode(DIFF1_TARGET_HEX)?);
+    Ok(u256_to_f64(diff1) / u256_to_f64(target))
+}
 
-    // difficulty = diff1 / target
-    // Scale up diff1 to preserve fractional precision for all target values.
-    // Using u128 for the scaled result allows precise representation up to ~1e38.
-    let scale = 1_000_000_000u64;
-    let diff1_scaled = diff1 * U256::from(scale);
-    let difficulty_scaled = diff1_scaled / target;
-
-    // Convert scaled difficulty back to f64
-    // Use low_u64() instead of as_u64() throughout: as_u64() panics on overflow
-    // (debug-mode overflow check), while low_u64() always returns the low 64 bits.
-    // For both branches we extract the 128-bit representation (two u64 halves)
-    // and reconstruct as f64, which handles the full range without panicking.
-    let difficulty_hi = (difficulty_scaled >> 64).low_u64();
-    let difficulty_lo = difficulty_scaled.low_u64();
-    let difficulty_scaled_f64 = (difficulty_hi as f64) * 1.8446744e19 + (difficulty_lo as f64);
-    Ok(difficulty_scaled_f64 / scale as f64)
+/// Nearest f64 of a U256 (each 64-bit limb is added at its weight).
+fn u256_to_f64(value: U256) -> f64 {
+    value.0.iter().rev().fold(0f64, |acc, &limb| {
+        acc * 18_446_744_073_709_551_616.0 + limb as f64
+    })
 }
 
 /// Validate that vardiff minimum floor configuration is sensible.
@@ -334,5 +355,94 @@ mod tests {
             "Pool difficulty should equal network_diff in deprecated mode, got {}",
             pool_diff
         );
+    }
+
+    fn diff1() -> U256 {
+        U256::from_big_endian(&hex::decode(DIFF1_TARGET_HEX).unwrap())
+    }
+
+    fn target(difficulty: f64) -> U256 {
+        U256::from_big_endian(&difficulty_to_target(difficulty).unwrap())
+    }
+
+    fn be(value: U256) -> [u8; 32] {
+        let mut out = [0u8; 32];
+        value.to_big_endian(&mut out);
+        out
+    }
+
+    #[test]
+    fn test_difficulty_one_is_diff1() {
+        assert_eq!(target(1.0), diff1());
+        assert_eq!(target_to_difficulty(&be(diff1())).unwrap(), 1.0);
+    }
+
+    #[test]
+    fn test_difficulty_to_target_is_exact() {
+        for d in [3u64, 7, 1000, 123_456_789, 1 << 40] {
+            assert_eq!(target(d as f64), diff1() / U256::from(d));
+        }
+        assert_eq!(target(0.5), diff1() * 2);
+        assert_eq!(target(0.25), diff1() * 4);
+        assert_eq!(target(1024.0), diff1() / 1024);
+    }
+
+    #[test]
+    fn test_regtest_target_round_trip() {
+        // Regtest powLimit (nBits 0x207fffff): 0x7fffff << 232. Its
+        // difficulty is about 4.66e-10; a 1e9 fixed-point conversion
+        // returned 0 here and refused every difficulty below 5e-10.
+        let regtest = U256::from(0x7f_ffffu64) << 232;
+        let d = target_to_difficulty(&be(regtest)).unwrap();
+        assert!(d > 4.65e-10 && d < 4.67e-10, "{d}");
+        let back = target(d);
+        let diff = if back > regtest {
+            back - regtest
+        } else {
+            regtest - back
+        };
+        assert!(diff < regtest >> 40, "{back} vs {regtest}");
+        // Low difficulties are accepted; the target saturates at 2^256 - 1.
+        assert!(!target(3e-10).is_zero());
+        assert_eq!(target(1e-12), U256::MAX);
+        assert_eq!(target(f64::MIN_POSITIVE), U256::MAX);
+        assert_eq!(target(5e-324), U256::MAX);
+        assert_eq!(
+            target_to_difficulty(&[0xff; 32]).unwrap(),
+            1.0 / 4294967296.0
+        );
+    }
+
+    #[test]
+    fn test_difficulty_round_trip_and_monotonic() {
+        let mut d = 1e-9;
+        let mut previous = U256::MAX;
+        while d < 1e15 {
+            let t = target(d);
+            assert!(t <= previous, "not monotonic at {d}");
+            previous = t;
+            let back = target_to_difficulty(&be(t)).unwrap();
+            assert!(((back - d) / d).abs() < 1e-12, "{d} -> {back}");
+            d *= 3.7;
+        }
+    }
+
+    #[test]
+    fn test_difficulty_refusals() {
+        for d in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            assert!(difficulty_to_target(d).is_err(), "{d}");
+        }
+        assert!(difficulty_to_target(1e80).is_err());
+        assert!(difficulty_to_target(f64::MAX).is_err());
+        assert!(target_to_difficulty(&[0u8; 32]).is_err());
+    }
+
+    #[test]
+    fn test_header_meets_difficulty_boundary() {
+        let t = target(1.0);
+        assert!(header_meets_difficulty(&be(t), 1.0).unwrap());
+        assert!(!header_meets_difficulty(&be(t + 1), 1.0).unwrap());
+        // Every hash meets a difficulty whose target saturates.
+        assert!(header_meets_difficulty(&[0xff; 32], 1e-12).unwrap());
     }
 }
