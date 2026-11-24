@@ -422,4 +422,107 @@ mod tests {
         }
         Ok(())
     }
+
+    /// Golden vectors for the fork value in the BIP143 preimage.
+    ///
+    /// Generated with lotusd's Python reference `SignatureHashForkId`
+    /// (lotusd/test/functional/test_framework/script.py) for exactly the
+    /// fixed transaction from `test_sighash_preimage` above (version 1,
+    /// one input with prevout txid ae*32 / n 0x12345678, sequence
+    /// 0xffffffff, script_code 0x51, amount 12345, one empty output of
+    /// value 0, lock time 0), once at fork value 0 and once at
+    /// CHAIN_FORK_ID (0x4c4f54, hashtype 0x4c4f5441).
+    ///
+    /// Generator snippet (run with the lotusd checkout):
+    /// ```text
+    /// import sys
+    /// sys.path.insert(0, "<lotusd>/test/functional")
+    /// from test_framework.messages import CTransaction, CTxIn, CTxOut, COutPoint, hash256
+    /// from test_framework.script import CScript, CScriptOp, SignatureHashForkId
+    ///
+    /// tx = CTransaction()
+    /// tx.nVersion = 1
+    /// tx.vin = [CTxIn(outpoint=COutPoint(hash=int.from_bytes(b"\xae" * 32, "little"),
+    ///                                    n=0x12345678),
+    ///                 scriptSig=CScript(), nSequence=0xFFFFFFFF)]
+    /// tx.vout = [CTxOut(nValue=0, scriptPubKey=CScript())]
+    /// tx.nLockTime = 0
+    /// script_code = CScript([CScriptOp(0x51)])
+    /// for hashtype in (0x41, 0x4C4F5441):
+    ///     sighash = SignatureHashForkId(script_code, tx, 0, hashtype, 12345)
+    ///     print(f"{hashtype:#x} sighash={sighash.hex()}")
+    /// ```
+    #[test]
+    fn test_sighash_preimage_fork_id_golden() -> Result<(), Box<dyn std::error::Error>> {
+        use crate::CHAIN_FORK_ID;
+
+        let tx = UnhashedTx {
+            version: 1,
+            inputs: vec![TxInput {
+                prev_out: OutPoint {
+                    txid: Sha256d::new([0xae; 32]),
+                    out_idx: 0x12345678,
+                },
+                script: Script::default(),
+                sequence: SequenceNo::finalized(),
+                sign_data: Some(SignData::new(vec![
+                    SignField::Value(12345),
+                    SignField::RedeemScript(Script::from_slice(&[0x51])),
+                ])),
+            }],
+            outputs: vec![TxOutput::default()],
+            lock_time: 0,
+        };
+        let mut unsigned_tx = UnsignedTx::new(tx);
+        let input = unsigned_tx.input_at(0);
+
+        // Fork value 0: byte-for-byte the preimage from test_sighash_preimage
+        {
+            let preimage = input.sighash_preimage(SigHashType::ALL_BIP143, None)?.bytes;
+            assert_eq!(
+                preimage.hex(),
+                "01000000\
+                2c084ff03a1103581b512a25262f9a7d7e17565de0d4a4bb5d45cabb9b1f2ffb\
+                3bb13029ce7b1f559ef5e747fcac439f1455a2ec7c5f09b72290795e70665044\
+                aeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeae78563412\
+                0151\
+                3930000000000000\
+                ffffffff\
+                edb908054ac1409be5f77d5369c6e03490b2f6676d68d0b3370f8159e0fdadf9\
+                00000000\
+                41000000"
+            );
+            assert_eq!(
+                Sha256d::digest(preimage).as_slice(),
+                &hex::decode("a4140b14d52e977545274a1fbace142391c4227e5ca3cf3e1b3d4ed58eae5c51")?,
+            );
+        }
+
+        // CHAIN_FORK_ID: only the trailing 4 sighash-type bytes differ
+        // (0x4c4f5441 serialized little-endian: 41 54 4f 4c)
+        let sighash_type = SigHashType::ALL_BIP143.with_fork_value(CHAIN_FORK_ID);
+        {
+            let preimage = input.sighash_preimage(sighash_type, None)?.bytes;
+            assert_eq!(&preimage[preimage.len() - 4..], &[0x41, 0x54, 0x4f, 0x4c]);
+            assert_eq!(
+                preimage.hex(),
+                "01000000\
+                2c084ff03a1103581b512a25262f9a7d7e17565de0d4a4bb5d45cabb9b1f2ffb\
+                3bb13029ce7b1f559ef5e747fcac439f1455a2ec7c5f09b72290795e70665044\
+                aeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeaeae78563412\
+                0151\
+                3930000000000000\
+                ffffffff\
+                edb908054ac1409be5f77d5369c6e03490b2f6676d68d0b3370f8159e0fdadf9\
+                00000000\
+                41544f4c"
+            );
+            assert_eq!(
+                Sha256d::digest(preimage).as_slice(),
+                &hex::decode("dee2f4bfa867e5c3494126942c9bff1b543567e5d0192a4a9902f8bca3805fe6")?,
+            );
+        }
+
+        Ok(())
+    }
 }
