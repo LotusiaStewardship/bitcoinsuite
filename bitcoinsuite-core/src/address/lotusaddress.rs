@@ -17,8 +17,13 @@ pub struct LotusAddress {
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub enum LotusAddressPayload {
-    /// Type byte 0: 20-byte HASH160 (P2PKH/P2SH, matching xpi-ts format)
+    /// Type byte 0, legacy bare 20-byte HASH160 payload. The historical
+    /// format of this library; kept parseable for stored addresses, but
+    /// lotusd v12's `XAddress::Parse` and xpi-ts reject it for P2PKH/P2SH.
     Hash(ShaRmd160),
+    /// Type byte 0, full scriptPubKey payload: 25-byte P2PKH or 23-byte P2SH,
+    /// matching lotusd v12 `XAddress::Encode` and xpi-ts `toXAddress`.
+    Script(Script),
     /// Type byte 2: 33-byte Taproot commitment pubkey (xpi-ts P2TR format)
     Taproot(PubKey),
 }
@@ -49,7 +54,7 @@ pub enum LotusAddressError {
     InvalidPayloadType(u8),
     #[error("Invalid checksum, expected {expected} but got {actual}")]
     InvalidChecksum { expected: String, actual: String },
-    #[error("Invalid hash payload length: expected 20, got {0}")]
+    #[error("Invalid type-0 payload length: expected 20 (legacy bare hash), 23 (P2SH script) or 25 (P2PKH script), got {0}")]
     InvalidHashPayloadLength(usize),
     #[error("Invalid Taproot payload length: expected {PUBKEY_LENGTH}, got {0}")]
     InvalidTaprootPayloadLength(usize),
@@ -68,17 +73,28 @@ impl LotusAddress {
         &self.lotus_addr
     }
 
+    /// Output script for this address. For a legacy bare-hash payload this is
+    /// the P2PKH script of the hash; for a full-script payload it is the
+    /// exact script that was encoded (lotusd/xpi-ts interoperability).
     pub fn script(&self) -> Script {
         match &self.payload {
             LotusAddressPayload::Hash(hash) => Script::p2pkh(hash),
+            LotusAddressPayload::Script(script) => script.clone(),
             LotusAddressPayload::Taproot(pubkey) => Script::p2tr(pubkey, None),
         }
     }
 
-    pub fn hash(&self) -> Option<&ShaRmd160> {
+    /// HASH160 for P2PKH/P2SH payloads: stored directly for legacy bare-hash
+    /// payloads, extracted from the script for full-script payloads. `None`
+    /// for taproot addresses.
+    pub fn hash(&self) -> Option<ShaRmd160> {
         match &self.payload {
-            LotusAddressPayload::Hash(h) => Some(h),
-            _ => None,
+            LotusAddressPayload::Hash(hash) => Some(hash.clone()),
+            LotusAddressPayload::Script(script) => match script.parse_variant() {
+                crate::ScriptVariant::P2PKH(hash) | crate::ScriptVariant::P2SH(hash) => Some(hash),
+                _ => None,
+            },
+            LotusAddressPayload::Taproot(_) => None,
         }
     }
 
@@ -89,9 +105,23 @@ impl LotusAddress {
         }
     }
 
-    /// Create from HASH160 (type byte 0, xpi-ts format for P2PKH/P2SH).
+    /// Create a P2PKH address from HASH160, emitting the node/xpi-ts
+    /// full-script form: type byte 0 with the 25-byte P2PKH scriptPubKey as
+    /// payload, the only P2PKH form lotusd v12's `XAddress::Parse` and
+    /// xpi-ts accept.
     pub fn from_hash(prefix: &str, net: Net, hash: ShaRmd160) -> Self {
-        encode(prefix, net, LotusAddressType::Hash, hash.as_slice())
+        encode_payload(
+            prefix,
+            net,
+            LotusAddressPayload::Script(Script::p2pkh(&hash)),
+        )
+    }
+
+    /// Legacy form: bare 20-byte HASH160 payload (type byte 0). Kept for
+    /// reading back stored addresses; lotusd v12 and xpi-ts reject it, so
+    /// new code should use [LotusAddress::from_hash].
+    pub fn from_hash_legacy(prefix: &str, net: Net, hash: ShaRmd160) -> Self {
+        encode_payload(prefix, net, LotusAddressPayload::Hash(hash))
     }
 
     // ponytail: compatibility — stratum-server-nng tests pass full scripts.
@@ -103,31 +133,36 @@ impl LotusAddress {
 
     /// Create from Taproot commitment pubkey (type byte 2, xpi-ts format).
     pub fn from_taproot(prefix: &str, net: Net, pubkey: &PubKey) -> Self {
-        encode(
-            prefix,
-            net,
-            LotusAddressType::TaprootCommitment,
-            pubkey.as_slice(),
-        )
+        encode_payload(prefix, net, LotusAddressPayload::Taproot(pubkey.clone()))
     }
 
-    /// Create from a Script, extracting the appropriate payload based on variant.
+    /// Create from a Script, emitting the node/xpi-ts form: P2PKH/P2SH
+    /// scripts become a full-scriptPubKey payload (type byte 0), taproot a
+    /// 33-byte commitment (type byte 2).
     pub fn from_script(prefix: &str, net: Net, script: &Script) -> Result<Self, LotusAddressError> {
         match script.parse_variant() {
-            crate::ScriptVariant::P2PKH(hash) => Ok(Self::from_hash(prefix, net, hash)),
-            crate::ScriptVariant::P2SH(hash) => Ok(Self::from_hash(prefix, net, hash)),
+            crate::ScriptVariant::P2PKH(_) | crate::ScriptVariant::P2SH(_) => Ok(encode_payload(
+                prefix,
+                net,
+                LotusAddressPayload::Script(script.clone()),
+            )),
             crate::ScriptVariant::P2TR(pubkey, _) => Ok(Self::from_taproot(prefix, net, &pubkey)),
             _ => Err(InvalidPayloadType(0)),
         }
     }
 }
 
-fn encode(
-    prefix: &str,
-    net: Net,
-    addr_type: LotusAddressType,
-    payload_bytes: &[u8],
-) -> LotusAddress {
+fn encode_payload(prefix: &str, net: Net, payload: LotusAddressPayload) -> LotusAddress {
+    let addr_type = match &payload {
+        LotusAddressPayload::Hash(_) | LotusAddressPayload::Script(_) => LotusAddressType::Hash,
+        LotusAddressPayload::Taproot(_) => LotusAddressType::TaprootCommitment,
+    };
+    let payload_bytes: &[u8] = match &payload {
+        LotusAddressPayload::Hash(hash) => hash.as_slice(),
+        LotusAddressPayload::Script(script) => script.bytecode().as_ref(),
+        LotusAddressPayload::Taproot(pubkey) => pubkey.as_slice(),
+    };
+
     let mut lotus_addr = prefix.to_string();
     let net_char = match net {
         Net::Mainnet => '_',
@@ -143,15 +178,6 @@ fn encode(
     data.put_slice(payload_bytes);
     data.put_slice(&checksum);
     lotus_addr.push_str(&bs58::encode(data.as_slice()).into_string());
-
-    let payload = match addr_type {
-        LotusAddressType::Hash => {
-            LotusAddressPayload::Hash(ShaRmd160::new(payload_bytes.try_into().unwrap()))
-        }
-        LotusAddressType::TaprootCommitment => {
-            LotusAddressPayload::Taproot(PubKey::new_unchecked(payload_bytes.try_into().unwrap()))
-        }
-    };
 
     LotusAddress {
         prefix: prefix.to_string(),
@@ -211,9 +237,6 @@ impl FromStr for LotusAddress {
 
         // Validate payload length after checksum check (short inputs fail checksum first)
         match addr_type {
-            LotusAddressType::Hash if payload.len() != 20 => {
-                return Err(InvalidHashPayloadLength(payload.len()))
-            }
             LotusAddressType::TaprootCommitment if payload.len() != PUBKEY_LENGTH => {
                 return Err(InvalidTaprootPayloadLength(payload.len()))
             }
@@ -221,9 +244,14 @@ impl FromStr for LotusAddress {
         }
 
         let payload_enum = match addr_type {
-            LotusAddressType::Hash => {
-                LotusAddressPayload::Hash(ShaRmd160::new(payload.try_into().unwrap()))
-            }
+            LotusAddressType::Hash => match payload.len() {
+                // Legacy bare HASH160 (historical format of this library)
+                20 => LotusAddressPayload::Hash(ShaRmd160::new(payload.try_into().unwrap())),
+                // Full scriptPubKey: 25-byte P2PKH or 23-byte P2SH, matching
+                // lotusd v12 XAddress::Parse and xpi-ts toXAddress
+                23 | 25 => LotusAddressPayload::Script(Script::from_slice(payload)),
+                len => return Err(InvalidHashPayloadLength(len)),
+            },
             LotusAddressType::TaprootCommitment => {
                 LotusAddressPayload::Taproot(PubKey::new_unchecked(payload.try_into().unwrap()))
             }
@@ -270,6 +298,31 @@ mod tests {
     const TESTNET_P2PKH: &str = "lotusT1HWH7ZdGdFJfbGUZwdg3aCQL1xgQmMVjU9";
     const MAINNET_P2SH: &str = "lotus_14U3yfq9YupnAjRVtKQGo5MKX8digk5uVZ";
     const REGTEST_P2SH: &str = "lotusR14U3yfq9YupnAjRVtKQGo5MKX8difdLFws";
+    /// Node-valid regtest P2PKH address (lotusd v12 `XAddress::Encode`: the
+    /// type-0 payload is the full scriptPubKey), taken from the DEV-336
+    /// regtest harness. The script is
+    /// `OP_DUP OP_HASH160 <hash160(pubkey(seckey=[1;32]))> OP_EQUALVERIFY OP_CHECKSIG`.
+    const REGTEST_NODE_P2PKH: &str = "lotusR16PSJLqasHgB8GqFFzCqpJGH3Bpgh399zfuDxUJcn";
+
+    /// Build a LotusAddress string from raw parts with a valid checksum
+    /// (test helper for malformed-payload cases).
+    fn raw_address(prefix: &str, net_char: char, addr_type: u8, payload: &[u8]) -> String {
+        use crate::{BytesMut, Sha256};
+        let mut preimage = BytesMut::new();
+        preimage.put_slice(prefix.as_bytes());
+        preimage.put_slice(&[net_char as u8, addr_type]);
+        preimage.put_slice(payload);
+        let checksum = Sha256::digest(preimage.freeze());
+
+        let mut data = BytesMut::new();
+        data.put_slice(&[addr_type]);
+        data.put_slice(payload);
+        data.put_slice(&checksum.as_slice()[..4]);
+        format!(
+            "{prefix}{net_char}{}",
+            bs58::encode(data.as_slice()).into_string()
+        )
+    }
 
     fn test_hash() -> ShaRmd160 {
         ShaRmd160::from_hex("b50b86a893d80c9e2ee72b199612374b7b4c1cd8").unwrap()
@@ -284,20 +337,20 @@ mod tests {
         let addr: LotusAddress = MAINNET_P2PKH.parse()?;
         assert_eq!(addr.prefix(), "lotus");
         assert_eq!(addr.net(), Net::Mainnet);
-        assert_eq!(addr.hash(), Some(&test_hash()));
+        assert_eq!(addr.hash(), Some(test_hash()));
         assert_eq!(addr.as_str(), MAINNET_P2PKH);
 
         let addr: LotusAddress = REGTEST_P2PKH.parse()?;
         assert_eq!(addr.net(), Net::Regtest);
-        assert_eq!(addr.hash(), Some(&test_hash()));
+        assert_eq!(addr.hash(), Some(test_hash()));
 
         let addr: LotusAddress = MAINNET_P2SH.parse()?;
         assert_eq!(addr.net(), Net::Mainnet);
-        assert_eq!(addr.hash(), Some(&p2sh_hash()));
+        assert_eq!(addr.hash(), Some(p2sh_hash()));
 
         let addr: LotusAddress = REGTEST_P2SH.parse()?;
         assert_eq!(addr.net(), Net::Regtest);
-        assert_eq!(addr.hash(), Some(&p2sh_hash()));
+        assert_eq!(addr.hash(), Some(p2sh_hash()));
 
         // Error cases
         assert_eq!(
@@ -347,29 +400,41 @@ mod tests {
 
     #[test]
     fn encode_lotus_address() -> Result<(), Box<dyn std::error::Error>> {
+        use crate::Script;
         let hash = test_hash();
         let p2sh_hash = p2sh_hash();
 
+        // from_hash emits the node/xpi-ts full-script P2PKH form
         let addr = LotusAddress::from_hash(LOTUS_PREFIX, Net::Mainnet, hash.clone());
-        assert_eq!(addr.hash(), Some(&hash));
-        assert_eq!(addr.as_str(), MAINNET_P2PKH);
+        assert_eq!(addr.hash(), Some(hash.clone()));
+        assert_eq!(addr.script(), Script::p2pkh(&hash));
+        assert!(addr.as_str().starts_with("lotus_"));
+        let reparsed: LotusAddress = addr.as_str().parse()?;
+        assert_eq!(reparsed.script(), Script::p2pkh(&hash));
 
         let addr = LotusAddress::from_hash(LOTUS_PREFIX, Net::Regtest, hash.clone());
-        assert_eq!(addr.as_str(), REGTEST_P2PKH);
+        assert!(addr.as_str().starts_with("lotusR"));
 
         let addr = LotusAddress::from_hash(LOTUS_PREFIX, Net::Testnet, hash.clone());
         assert!(addr.as_str().starts_with("lotusT"));
 
-        let addr = LotusAddress::from_hash(LOTUS_PREFIX, Net::Mainnet, p2sh_hash.clone());
+        // from_hash_legacy keeps emitting the historical bare-hash form
+        let addr = LotusAddress::from_hash_legacy(LOTUS_PREFIX, Net::Mainnet, hash.clone());
+        assert_eq!(addr.as_str(), MAINNET_P2PKH);
+
+        let addr = LotusAddress::from_hash_legacy(LOTUS_PREFIX, Net::Regtest, hash.clone());
+        assert_eq!(addr.as_str(), REGTEST_P2PKH);
+
+        let addr = LotusAddress::from_hash_legacy(LOTUS_PREFIX, Net::Mainnet, p2sh_hash.clone());
         assert_eq!(addr.as_str(), MAINNET_P2SH);
 
-        let addr = LotusAddress::from_hash(LOTUS_PREFIX, Net::Regtest, p2sh_hash.clone());
+        let addr = LotusAddress::from_hash_legacy(LOTUS_PREFIX, Net::Regtest, p2sh_hash.clone());
         assert_eq!(addr.as_str(), REGTEST_P2SH);
 
         // Round-trip from encoded string
         let parsed: LotusAddress = TESTNET_P2PKH.parse()?;
         assert_eq!(parsed.net(), Net::Testnet);
-        assert_eq!(parsed.hash(), Some(&hash));
+        assert_eq!(parsed.hash(), Some(hash));
         Ok(())
     }
 
@@ -404,5 +469,51 @@ mod tests {
         let parsed: LotusAddress = address.as_str().parse()?;
         assert_eq!(parsed.script(), p2tr_script);
         Ok(())
+    }
+
+    /// The node/xpi-ts P2PKH form carries the full 25-byte scriptPubKey as
+    /// the type-0 payload; it must parse and yield the exact script.
+    #[test]
+    fn test_parse_full_script_p2pkh_payload() -> Result<(), Box<dyn std::error::Error>> {
+        use crate::Script;
+        let addr: LotusAddress = REGTEST_NODE_P2PKH.parse()?;
+        assert_eq!(addr.prefix(), "lotus");
+        assert_eq!(addr.net(), Net::Regtest);
+        // hash160 extracted from the script payload
+        assert_eq!(
+            addr.hash(),
+            Some(ShaRmd160::from_hex(
+                "79b000887626b294a914501a4cd226b58b235983"
+            )?)
+        );
+        assert_eq!(
+            addr.script(),
+            Script::from_hex("76a91479b000887626b294a914501a4cd226b58b23598388ac")?
+        );
+        Ok(())
+    }
+
+    /// Type-0 payloads of any other length are rejected, even with a valid
+    /// checksum.
+    #[test]
+    fn test_parse_rejects_unexpected_type0_lengths() {
+        // 21 bytes: neither a bare hash nor a known scriptPubKey
+        let addr_str = raw_address("lotus", 'R', 0, &[0x51; 21]);
+        assert_eq!(
+            addr_str.parse::<LotusAddress>().unwrap_err(),
+            LotusAddressError::InvalidHashPayloadLength(21)
+        );
+        // 24 bytes: between P2SH (23) and P2PKH (25)
+        let addr_str = raw_address("lotus", 'R', 0, &[0x51; 24]);
+        assert_eq!(
+            addr_str.parse::<LotusAddress>().unwrap_err(),
+            LotusAddressError::InvalidHashPayloadLength(24)
+        );
+        // 19 bytes: one short of a bare hash
+        let addr_str = raw_address("lotus", 'R', 0, &[0x51; 19]);
+        assert_eq!(
+            addr_str.parse::<LotusAddress>().unwrap_err(),
+            LotusAddressError::InvalidHashPayloadLength(19)
+        );
     }
 }

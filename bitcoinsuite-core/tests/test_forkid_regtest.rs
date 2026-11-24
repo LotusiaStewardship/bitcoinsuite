@@ -16,9 +16,9 @@
 
 use bitcoinsuite_core::{
     ecc::{Ecc, PubKey, SecKey},
-    BitcoinCode, Hashed, OutPoint, P2PKHSignatory, Script, SequenceNo, Sha256, Sha256d, ShaRmd160,
-    SigHashType, SignData, SignField, TxBuilder, TxBuilderInput, TxBuilderOutput, TxInput,
-    TxOutput, CHAIN_FORK_ID,
+    BitcoinCode, Hashed, LotusAddress, Net, OutPoint, P2PKHSignatory, Script, SequenceNo, Sha256,
+    Sha256d, ShaRmd160, SigHashType, SignData, SignField, TxBuilder, TxBuilderInput,
+    TxBuilderOutput, TxInput, TxOutput, CHAIN_FORK_ID,
 };
 use bitcoinsuite_ecc_secp256k1::EccSecp256k1;
 use serde_json::{json, Value};
@@ -121,10 +121,8 @@ fn base58_encode(input: &[u8]) -> String {
 /// `[type byte 0] ++ payload ++ checksum`, with the payload being the full
 /// scriptPubKey and checksum = SHA256("lotus" ++ 'R' ++ type ++ payload)[..4].
 ///
-/// Note: this intentionally deviates from
-/// `LotusAddress::from_hash("lotus", Net::Regtest, hash160)`, whose payload
-/// is the bare 20-byte hash (xpi-ts format); lotusd v12.0.2 rejects that
-/// format for P2PKH.
+/// Kept as an independent cross-check of `LotusAddress::from_script`
+/// (DEV-355): the library must generate exactly this string.
 fn lotusd_regtest_p2pkh_address(script: &Script) -> String {
     // Raw script bytes (bytecode), NOT ser() which prefixes a compact-size
     // length; the XAddress payload is the scriptPubKey itself.
@@ -286,17 +284,23 @@ fn test_forkid_regtest_acceptance() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     // P2PKH address derived from a known sec key. The script comes from the
-    // library; the address string uses lotusd v12's XAddress P2PKH encoding
-    // (full scriptPubKey payload), since bitcoinsuite-core's
-    // LotusAddress::from_hash encodes a bare 20-byte hash160 payload, which
-    // lotusd v12.0.2's XAddress::Parse rejects (a pre-existing
-    // LotusAddress encoding gap; tracked separately).
+    // library; the address string is generated with
+    // `LotusAddress::from_script`, which since DEV-355 emits lotusd v12's
+    // XAddress P2PKH encoding (full scriptPubKey payload). The manual
+    // encoder above stays as an independent cross-check.
     let ecc = EccSecp256k1::default();
     let seckey = ecc.seckey_from_array([1; 32])?;
     let pubkey = ecc.derive_pubkey(&seckey);
     let pubkey_hash = ShaRmd160::digest(pubkey.array().into());
     let p2pkh_script = Script::p2pkh(&pubkey_hash);
-    let address = lotusd_regtest_p2pkh_address(&p2pkh_script);
+    let address = LotusAddress::from_script("lotus", Net::Regtest, &p2pkh_script)?
+        .as_str()
+        .to_string();
+    assert_eq!(
+        address,
+        lotusd_regtest_p2pkh_address(&p2pkh_script),
+        "library address must match the manual XAddress encoder"
+    );
     assert!(
         address.starts_with("lotusR"),
         "unexpected regtest address {address}"
