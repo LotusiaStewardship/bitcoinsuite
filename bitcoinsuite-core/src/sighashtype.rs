@@ -1,10 +1,24 @@
 use std::fmt::Display;
 
+/// The Lotus chain's fork id, committed to every signature while replay
+/// protection is active (`CHAIN_FORK_ID` in `lotusd/src/script/sighashtype.h`).
+///
+/// This is a chain identity, not an epoch marker: a signature made for this
+/// value is invalid on any chain using a different fork id, and a signature
+/// made for another chain is invalid here. It occupies the 24-bit
+/// [`SigHashType::fork_value`] field, so it must fit in 24 bits and must not
+/// be zero. Do not change this value without a coordinated hard fork.
+pub const CHAIN_FORK_ID: u32 = 0x4c_4f_54; // "LOT"
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct SigHashType {
     pub variant: SigHashTypeVariant,
     pub input_type: SigHashTypeInputs,
     pub output_type: SigHashTypeOutputs,
+    /// 24-bit fork value committed to the signature (bits 8..=31 of the
+    /// serialized 32-bit sighash type). 0 before replay protection
+    /// activation. Set it with [`SigHashType::with_fork_value`].
+    pub fork_value: u32,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -34,58 +48,85 @@ impl SigHashType {
         variant: SigHashTypeVariant::Lotus,
         input_type: SigHashTypeInputs::Fixed,
         output_type: SigHashTypeOutputs::All,
+        fork_value: 0,
     };
     pub const ALL_BIP143: SigHashType = SigHashType {
         variant: SigHashTypeVariant::Bip143,
         input_type: SigHashTypeInputs::Fixed,
         output_type: SigHashTypeOutputs::All,
+        fork_value: 0,
     };
     pub const NONE_BIP143: SigHashType = SigHashType {
         variant: SigHashTypeVariant::Bip143,
         input_type: SigHashTypeInputs::Fixed,
         output_type: SigHashTypeOutputs::None,
+        fork_value: 0,
     };
     pub const SINGLE_BIP143: SigHashType = SigHashType {
         variant: SigHashTypeVariant::Bip143,
         input_type: SigHashTypeInputs::Fixed,
         output_type: SigHashTypeOutputs::Single,
+        fork_value: 0,
     };
     pub const ALL_BIP143_ANYONECANPAY: SigHashType = SigHashType {
         variant: SigHashTypeVariant::Bip143,
         input_type: SigHashTypeInputs::AnyoneCanPay,
         output_type: SigHashTypeOutputs::All,
+        fork_value: 0,
     };
     pub const NONE_BIP143_ANYONECANPAY: SigHashType = SigHashType {
         variant: SigHashTypeVariant::Bip143,
         input_type: SigHashTypeInputs::AnyoneCanPay,
         output_type: SigHashTypeOutputs::None,
+        fork_value: 0,
     };
     pub const SINGLE_BIP143_ANYONECANPAY: SigHashType = SigHashType {
         variant: SigHashTypeVariant::Bip143,
         input_type: SigHashTypeInputs::AnyoneCanPay,
         output_type: SigHashTypeOutputs::Single,
+        fork_value: 0,
     };
 
-    pub fn to_u32(&self) -> u32 {
-        self.input_type.to_u32() | self.output_type.to_u32() | self.variant.to_u32()
+    /// Set the 24-bit fork value committed to the signature (e.g.
+    /// [`CHAIN_FORK_ID`] on Lotus chains while replay protection is active).
+    ///
+    /// Panics when `fork_value` does not fit in 24 bits.
+    pub const fn with_fork_value(self, fork_value: u32) -> Self {
+        assert!(fork_value <= 0x00ff_ffff, "fork value must fit in 24 bits");
+        SigHashType {
+            variant: self.variant,
+            input_type: self.input_type,
+            output_type: self.output_type,
+            fork_value,
+        }
     }
 
+    /// Serialize to the full 32-bit sighash type: fork value in bits
+    /// 8..=31, low byte carrying input/output/variant flags.
+    pub fn to_u32(&self) -> u32 {
+        ((self.fork_value & 0x00ff_ffff) << 8)
+            | self.input_type.to_u32()
+            | self.output_type.to_u32()
+            | self.variant.to_u32()
+    }
+
+    /// Parse the full 32-bit sighash type, extracting the 24-bit fork value
+    /// from bits 8..=31. Returns `None` when the low byte does not encode a
+    /// valid input/output/variant combination.
     pub fn from_u32(flags: u32) -> Option<SigHashType> {
-        if flags & 0xffff_ff00 != 0 {
-            return None;
-        }
-        let variant = match flags & 0x7c {
+        let low_byte = flags & 0xff;
+        let fork_value = flags >> 8;
+        let variant = match low_byte & 0x7c {
             0 => SigHashTypeVariant::Legacy,
             0x40 => SigHashTypeVariant::Bip143,
             0x60 => SigHashTypeVariant::Lotus,
             _ => return None,
         };
-        let input_type = match flags & 0x80 {
+        let input_type = match low_byte & 0x80 {
             0 => SigHashTypeInputs::Fixed,
-            0x80 => SigHashTypeInputs::AnyoneCanPay,
-            _ => unreachable!(),
+            _ => SigHashTypeInputs::AnyoneCanPay,
         };
-        let output_type = match flags & 0x03 {
+        let output_type = match low_byte & 0x03 {
             0 => return None,
             1 => SigHashTypeOutputs::All,
             2 => SigHashTypeOutputs::None,
@@ -96,6 +137,7 @@ impl SigHashType {
             variant,
             input_type,
             output_type,
+            fork_value,
         })
     }
 }
@@ -145,6 +187,9 @@ impl Display for SigHashType {
         if let SigHashTypeInputs::AnyoneCanPay = self.input_type {
             write!(f, "|ANYONECANPAY")?;
         }
+        if self.fork_value != 0 {
+            write!(f, "|CHAINID:0x{:x}", self.fork_value)?;
+        }
         Ok(())
     }
 }
@@ -170,6 +215,20 @@ mod tests {
             SigHashType::SINGLE_BIP143_ANYONECANPAY.to_string(),
             "SINGLE|FORKID|ANYONECANPAY"
         );
+        assert_eq!(
+            SigHashType::ALL_BIP143.with_fork_value(0).to_string(),
+            "ALL|FORKID"
+        );
+        assert_eq!(
+            SigHashType::ALL_BIP143
+                .with_fork_value(crate::CHAIN_FORK_ID)
+                .to_string(),
+            "ALL|FORKID|CHAINID:0x4c4f54"
+        );
+        assert_eq!(
+            SigHashType::ALL_BIP143.with_fork_value(0xdead).to_string(),
+            "ALL|FORKID|CHAINID:0xdead"
+        );
     }
 
     #[test]
@@ -184,7 +243,12 @@ mod tests {
 
     #[test]
     fn test_sighash_from_u32() {
-        assert_eq!(SigHashType::from_u32(0xdead0041), None);
+        assert_eq!(
+            SigHashType::from_u32(0xdead_0041),
+            // fork value occupies bits 8..=31, matching lotusd's
+            // SigHashType::getForkValue() (sigHash >> 8)
+            Some(SigHashType::ALL_BIP143.with_fork_value(0xdead00))
+        );
         assert_eq!(SigHashType::from_u32(0x21), None);
         assert_eq!(SigHashType::from_u32(0x11), None);
         assert_eq!(SigHashType::from_u32(0x00), None);
@@ -224,9 +288,60 @@ mod tests {
                         variant: SigHashTypeVariant::Legacy,
                         input_type,
                         output_type,
+                        fork_value: 0,
                     }),
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_sighash_fork_value_roundtrip() {
+        for fork_value in [0, crate::CHAIN_FORK_ID, 0xdead, 0xdead00, 0xff_ffff] {
+            for sighash in [
+                SigHashType::ALL_BIP143,
+                SigHashType::NONE_BIP143,
+                SigHashType::SINGLE_BIP143,
+                SigHashType::ALL_BIP143_ANYONECANPAY,
+                SigHashType::NONE_BIP143_ANYONECANPAY,
+                SigHashType::SINGLE_BIP143_ANYONECANPAY,
+            ] {
+                let with_fork = sighash.with_fork_value(fork_value);
+                assert_eq!(with_fork.fork_value, fork_value);
+                assert_eq!(SigHashType::from_u32(with_fork.to_u32()), Some(with_fork));
+                // Variant/input/output unaffected by the fork value
+                assert_eq!(with_fork.variant, sighash.variant);
+                assert_eq!(with_fork.input_type, sighash.input_type);
+                assert_eq!(with_fork.output_type, sighash.output_type);
+            }
+        }
+    }
+
+    #[test]
+    fn test_sighash_fork_value_bound() {
+        // 24-bit maximum round-trips
+        let max_fork = SigHashType::ALL_BIP143.with_fork_value(0xff_ffff);
+        assert_eq!(max_fork.to_u32(), 0xffff_ff41);
+        assert_eq!(SigHashType::from_u32(0xffff_ff41), Some(max_fork));
+        // 25-bit fork values cannot exist: with_fork_value panics, and a u32
+        // input to from_u32 can never carry one ((0x100_0000 << 8) already
+        // overflows 32 bits)
+    }
+
+    #[test]
+    #[should_panic(expected = "fork value must fit in 24 bits")]
+    fn test_sighash_fork_value_panics_above_24_bits() {
+        let _ = SigHashType::ALL_BIP143.with_fork_value(0x100_0000);
+    }
+
+    #[test]
+    fn test_sighash_chain_fork_id_serialization() {
+        let sighash = SigHashType::ALL_BIP143.with_fork_value(crate::CHAIN_FORK_ID);
+        assert_eq!(sighash.to_u32(), 0x4c4f_5441);
+        assert_eq!(
+            sighash.to_u32().to_le_bytes(),
+            [0x41, 0x54, 0x4f, 0x4c] // LE of 0x4c4f5441 ("LOT" + 0x41)
+        );
+        assert_eq!(SigHashType::from_u32(0x4c4f_5441), Some(sighash));
     }
 }
