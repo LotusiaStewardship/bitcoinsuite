@@ -11,7 +11,7 @@
 //! ```
 //!
 //! Env overrides:
-//! - `LOTUSD_BIN`: lotusd binary (default: the build-clang checkout)
+//! - `LOTUSD_BIN`: lotusd binary (default: the sibling `../lotusd` checkout)
 //! - `DEV336_RPC_PORT`: RPC port base (default: 38300 + pid % 2000)
 
 use bitcoinsuite_core::{
@@ -32,9 +32,23 @@ use std::{
 
 const RPC_USER: &str = "dev336";
 const RPC_PASSWORD: &str = "dev336-regtest-password";
-const DEFAULT_LOTUSD_BIN: &str =
-    "/home/matthew/Documents/Code/lotusia/lotusd/build-clang/src/lotusd";
+/// Default relative to the workspace root; override with `LOTUSD_BIN`.
+const DEFAULT_LOTUSD_BIN: &str = "../lotusd/build-clang/src/lotusd";
 const FEE_SATS: i64 = 1_000;
+
+/// Locate the lotusd binary: `LOTUSD_BIN`, then the sibling checkout from the
+/// workspace root or the crate root.
+fn lotusd_bin() -> String {
+    if let Ok(path) = std::env::var("LOTUSD_BIN") {
+        return path;
+    }
+    for candidate in [DEFAULT_LOTUSD_BIN, "../../lotusd/build-clang/src/lotusd"] {
+        if std::path::Path::new(candidate).exists() {
+            return candidate.to_string();
+        }
+    }
+    panic!("lotusd not found; set LOTUSD_BIN or build the sibling ../lotusd checkout");
+}
 
 /// Kills the node and removes the temp datadir even when assertions fail.
 struct NodeGuard {
@@ -220,7 +234,7 @@ fn build_spend(
 #[test]
 #[ignore]
 fn test_forkid_regtest_acceptance() -> Result<(), Box<dyn std::error::Error>> {
-    let lotusd_bin = std::env::var("LOTUSD_BIN").unwrap_or_else(|_| DEFAULT_LOTUSD_BIN.to_string());
+    let lotusd_bin = lotusd_bin();
     let rpc_port: u16 = std::env::var("DEV336_RPC_PORT")
         .ok()
         .and_then(|port| port.parse().ok())
@@ -275,7 +289,8 @@ fn test_forkid_regtest_acceptance() -> Result<(), Box<dyn std::error::Error>> {
     // library; the address string uses lotusd v12's XAddress P2PKH encoding
     // (full scriptPubKey payload), since bitcoinsuite-core's
     // LotusAddress::from_hash encodes a bare 20-byte hash160 payload, which
-    // lotusd v12.0.2's XAddress::Parse rejects (see report / follow-up).
+    // lotusd v12.0.2's XAddress::Parse rejects (a pre-existing
+    // LotusAddress encoding gap; tracked separately).
     let ecc = EccSecp256k1::default();
     let seckey = ecc.seckey_from_array([1; 32])?;
     let pubkey = ecc.derive_pubkey(&seckey);
