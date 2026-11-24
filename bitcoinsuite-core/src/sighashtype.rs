@@ -247,7 +247,7 @@ mod tests {
             SigHashType::from_u32(0xdead_0041),
             // fork value occupies bits 8..=31, matching lotusd's
             // SigHashType::getForkValue() (sigHash >> 8)
-            Some(SigHashType::ALL_BIP143.with_fork_value(0xdead_00))
+            Some(SigHashType::ALL_BIP143.with_fork_value(0xdead00))
         );
         assert_eq!(SigHashType::from_u32(0x21), None);
         assert_eq!(SigHashType::from_u32(0x11), None);
@@ -293,5 +293,55 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn test_sighash_fork_value_roundtrip() {
+        for fork_value in [0, crate::CHAIN_FORK_ID, 0xdead, 0xdead00, 0xff_ffff] {
+            for sighash in [
+                SigHashType::ALL_BIP143,
+                SigHashType::NONE_BIP143,
+                SigHashType::SINGLE_BIP143,
+                SigHashType::ALL_BIP143_ANYONECANPAY,
+                SigHashType::NONE_BIP143_ANYONECANPAY,
+                SigHashType::SINGLE_BIP143_ANYONECANPAY,
+            ] {
+                let with_fork = sighash.with_fork_value(fork_value);
+                assert_eq!(with_fork.fork_value, fork_value);
+                assert_eq!(SigHashType::from_u32(with_fork.to_u32()), Some(with_fork));
+                // Variant/input/output unaffected by the fork value
+                assert_eq!(with_fork.variant, sighash.variant);
+                assert_eq!(with_fork.input_type, sighash.input_type);
+                assert_eq!(with_fork.output_type, sighash.output_type);
+            }
+        }
+    }
+
+    #[test]
+    fn test_sighash_fork_value_bound() {
+        // 24-bit maximum round-trips
+        let max_fork = SigHashType::ALL_BIP143.with_fork_value(0xff_ffff);
+        assert_eq!(max_fork.to_u32(), 0xffff_ff41);
+        assert_eq!(SigHashType::from_u32(0xffff_ff41), Some(max_fork));
+        // 25-bit fork values cannot exist: with_fork_value panics, and a u32
+        // input to from_u32 can never carry one ((0x100_0000 << 8) already
+        // overflows 32 bits)
+    }
+
+    #[test]
+    #[should_panic(expected = "fork value must fit in 24 bits")]
+    fn test_sighash_fork_value_panics_above_24_bits() {
+        let _ = SigHashType::ALL_BIP143.with_fork_value(0x100_0000);
+    }
+
+    #[test]
+    fn test_sighash_chain_fork_id_serialization() {
+        let sighash = SigHashType::ALL_BIP143.with_fork_value(crate::CHAIN_FORK_ID);
+        assert_eq!(sighash.to_u32(), 0x4c4f_5441);
+        assert_eq!(
+            sighash.to_u32().to_le_bytes(),
+            [0x41, 0x54, 0x4f, 0x4c] // LE of 0x4c4f5441 ("LOT" + 0x41)
+        );
+        assert_eq!(SigHashType::from_u32(0x4c4f_5441), Some(sighash));
     }
 }
